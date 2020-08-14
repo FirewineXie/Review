@@ -1,2 +1,0 @@
-a=java.util.Date
-b=javax.swing.JFrame
