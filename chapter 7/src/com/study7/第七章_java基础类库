@@ -1,0 +1,157 @@
+第七章
+    7.1 与用户互动
+        7.1.1 运行java程序的参数
+            main方法签名
+            public static void 这三个都是由jvm调用来负责的，static 是让该类直接调用这个，不会创建对象
+
+        7.1.2 使用Scanner获取键盘输入
+            这个是一个基于键盘的文本扫描器，可以有多个数据源
+            主要提供了两个方法来扫描输入：{
+                hasNextXxx  是否还有下一个输入项 有int lang 等
+                nextXxx   获取下一个输入项
+
+                hasNext 是直接判断下一个输入项
+
+            }
+            useDelimiter 方法用来设置分隔符
+            在默认情况下，Scannner可以有空白来当分隔符
+
+            在这个类里，还有两个简单方法来逐行读取
+            boolean hasNextLine  判断是否有下一行
+            String nextLine   返回输入源中的下一样的字符串
+
+    7.2 系统相关
+        7.2.1 System类
+            代表当前的java程序的运行平台
+            这类提供了输入输出和错误输出的类变量，还可以提供方法可以访问环境变量，系统属性等等
+            当然上面的标准输出输入错误也可以改变就是setIN等方法
+
+            还提供判断对象是否一样是同一个对象。
+            具体可以看api
+        7.2.2 Runtime 与java9 的ProcessHandle
+            runtime代表java程序的运行环境，，则它可以查看jvm的一些信息，，
+            但是程序不能创建自己的runtime实例，但是通过getRuntime可以查看关联的对象
+            它即提供了通知系统进行垃圾回收，也提供了load和loadLibrary  来加载文件和动态链接库
+
+            还可以提供打开新的进程
+            ProcessHandle。info 类可以查看进程的等一系列操作
+
+        7.3 常用类
+            7.3.1 Object类
+                这个是所有类、数组、枚举类的父类，，，换句话说：java容许把任何类型的对象赋给Object类型的变量。
+                其他方法可以在api可以查看，，，
+                一个方法是protected 修饰的clone方法，这个帮助对象自我克隆的，副本跟原副本没有任何关系
+
+                有代码可以知道，克隆出来的对象只是原有对象的副本，只克隆该对象的所有成员变量值，但不会对引用类型的成员变量值所引用的对象进行克隆
+            7.3.2 Objects类
+                这类它提供了一些方法去操作对象的，大多是空指针都是安全的。
+
+            7.3.3 对于字符串的类
+                有三个类 String，StringBuffer，StringBuider
+                String类是不可变类，   直至销毁，，
+                StringBuffer 是代表字符序列可以改变的字符串，然后通过toString来变成String对象
+                StringBuider 跟上面类似，，他俩的区别是； StringBuffer 是线程安全的，Buider则没有故性能较高。
+                他们具体的方法可以查看api文档。
+
+                两个对象都有两个属性length和Capacity 只是第二个程序不考虑，，
+
+            7.3.4 Math类
+                这个类 方法多，只需要记住常用的，如果还有其他需求可以查看API
+            7.3.5 java的ThreadLocalRandom 与Random
+                Random是有两个构造器的，一个是根据时间，，一个是根据程序员自定的。。而生成一个伪随机数。
+
+                而java7  这个新类比Random更好，可以减少多线程资源竞争。
+                而且两者的用法相似，current方法来获取这个类的对象，就可以用了
+            7.3.6 BigDecimal 类
+                常用的float和double都有可能让精度丢失，，但这个类不会
+                这个类的使用要求是，不能使用构造器去添加数字，，要通过去valueOF等方法去创建BigDecimal对象
+                或者通常基于String的构造器
+
+
+                如果图简便 的话，可以再建一个方法，可以让计算后的BIgDecimal变成double，，这样可以直接调用
+        7.4 日期、时间类
+                java提供了Date和Calendar 用于处理日期、时间的类，，但是现在Date不仅无法实现国际化，而且它对不同属性也使用前后矛盾的偏移量
+                Calendar  则是显得过于复杂，，，，
+
+                java8提供了一个新的库  就是 Joda-Time库，，，
+
+                7.4.1 Date类
+                    这个由于太旧，，不再推荐使用
+                7.4.2 Calender 类
+                    这是一个抽象类，不能用构造器创建对象，方法是getInstance方法可以获取Calendar对象，
+                    而且这个类，可以与Date  自由转换
+
+
+                    注意的是：{
+                        1.add和roll区别 ： 他们都是可以改变Calendar的特定字段的值，但是add 可以与上一级想关联，，roll不会
+                        2.Calendar的容错性： setLenient方法可以提供容错性，，，当然你可以改变让严格的参数检查。
+                        3.set（f，value）  当f有值，时会立即改变，但是当你调动其他方法时，才会重新计算日历的时间。  这样的优势是不会触发多次不必要的计算
+                    }
+                7.4.3 java8新增的日期和时间包
+                    这个可以看api，，，这不过多说
+
+        7.5 正则表达式
+            Boolean matches  判断该字符创是否匹配指定的正则表达式
+            String replaceAll （String regex，String replacement） 将该字符创中所有匹配regex 的子串替换成 replacement
+            String【】split   用什么 做分隔符，，
+
+            7.5.1 创建正则表达式
+                支持的合法字符：{
+                    x  任何合法字符，\0mnn  八进制0mnn所表示的字符  \xhh 十六进制所表示的字符  \uhhhh  十六进制所表示Unicode字符
+                    \t 制表符  \n  换行  \r  回车符   \f  换页符   \a  报警   \e   escape符   \cx   x对应的控制符
+
+                }
+                {
+                    .匹配任意字符  \d 匹配0-9任意数字 \D  匹配非数字  \s 匹配所有的空白字符  \S  匹配非   \w  匹配所有的单词字符  \W 非单词字符
+                }
+
+            7.5.2 使用正则表达式
+                可以用Pattern 和Matcher  来使用正则表达式
+                pattern 对象是正则表达式编译后在内存中的表示形式，，，然后利用pattern 对象创建Matcher 对象那个
+
+
+                通过Matcher 类的find 和group 方法可以从目标字符串中依次取出特定子串，
+
+        7.6 变量处理和方法处理
+            java9 新增了VarHandle 增强了MethodHanle类，，，，  通过这两个类，可以容许java像动态语言一样引用变量，引用方法，并调用他们
+
+        7.7 java9 改进的国际化与格式化
+            国际化指的是网页会根据客户端的请求时那个国家而显示不同的界面，，目的就是提供自适应，更友好的用户界面，并不需要改变程序逻辑功能。
+
+            7.7.1 java国际化的思路
+                资源文件是key-values 对
+                是通过三个类而实现的，，，{
+                 java.util.ResourceBundle       加载国家，语言资源包
+                 java.util.locale               用于风汉族昂特定的国家的语言环境
+                 java.text.MessageFormat        用于格式化带占位符的字符串
+                }
+            7.7.2 java支持的国家和语言
+                使用getAvailableLocales方法类的locale类。。
+            7.7.3 完成程序国际化
+                关键类，ResourceBundle 类的GetBundle可以根据Locle挂载资源
+            7.7.4 使用MessageFormat 处理包含占位符的字符串
+                通过代码学习
+                 MessageFormat .format 可以利用配置文件进行填充预留下的占位符，，填充想要填写的东西
+            7.7.5 使用类文件代替资源文件
+                类名跟配置文件相似，但是类必须继承LIstResourcesBundle 并重写getContent放啊发，返回Object数组，，每一项都是key_value对
+
+                如果系统出现多种文件，，，对于ResourceBundle 会首先搜索资源文件是类文件，然后才是配置文件
+            7.7.6 java9 新增的日志API
+                两部操作{
+                    1调用system类的getlogger 获取System.logger对象
+                    2.调用上面对象的log方法，输出日提，，第一个参数设置级别
+
+                }
+            7.7.7 使用NumberFormat 格式化数字
+            7.7.8 使用DateFormat 格式化日期、时间
+            7.7.9 使用simpleDateFormat格式化日期
+                上面三个都还是需要的时候，可以看看，
+
+        7.8 java8 新增的日期，时间格式器
+            java。time。format包下提供了DateTimeFormatter 格式器类， 相当于DateFormat和SimpleDateFormat的合体
+            不仅可以将日期或时间对象格式化成字符串，也可以将特定格式的字符串解析成日期、时间对象，
+            有三种常见的方式：{
+                1、直接使用静态常量创建  格式器。
+                2、使用代表不同风格的枚举值来创建  各时期  。。有四个枚举值  full，LONG,MEDIM,SHORT
+                3、根据模式字符串来创建  格式器。
+            }

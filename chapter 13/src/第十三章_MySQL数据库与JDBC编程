@@ -1,0 +1,152 @@
+第十三章 MySQL数据库与JDBC编程
+    13.1 JDBC基础
+        JDBC的驱动通常有四种类型{
+            JDBC驱动（JDBC-ODBC桥，，java8已经删除）
+            JDBC驱动，直接将jdbc API 映射成数据库特定的客户端API
+            JDBC驱动，支持三层结构的JDBC访问方式，主要用于Applet阶段
+            JDBC驱动，是纯java的，直接与数据库实例交互的
+        }
+
+        其他关于数据库的知识，，在这都不过多打出
+
+
+    13.3 JDBC的典型用法
+        13.3.1 JDBC 4.2 常用接口和类简介
+            DriverManageer 用于管理JDBC驱动的服务类，，，主要是获取Connection对象
+            Connection 代表数据库连接对象，每个Connection都代表䘝物理连接会话，要想访问数据库，必须先获得数据库连接
+                该接口的常用方法如下：{
+                    Statement createStatement 返回一个Statement对象
+                    PreparedStatement prepareStatement（String sql） 该方法返回预编译的Statement对象
+                    CallableStatment prepareCall（String sql） 该方法返回CallableStatement 对象，这个用于调用存储过程
+                }
+            除了上面之外，Connection 还有几个用于控制事务的方法：{
+                Savepoint setSavepoint 创建一个保存点
+                SavePoint setSavepoint(String name)  以指定名字来创建一个保存点
+
+                等等，，就提看API
+
+            }
+
+            java7 还为 Connection提供了 访问的数据库Schema方法，还有控制数据库连接的超时行为的方法，
+
+            Statement 用于执行SQL语句的工具接口，  该对象可以执行DDL，DCL语句 也可以用于执行DMl 语句，进行查询的结果集，
+            {
+                ResultSet  executeQuery 用于执行查询语句
+                int executeUPDATE 执行DML 语句
+                Boolean execut  可以执行任何sql语句
+            }
+
+            java8 为Statement 新增了多个重载的executeLargeUPDATE方法，，，返回值类型是long，，可以支持记录条数更多，
+
+            PreparedStatement 预编译的Statement对象， 这个可以避免数据库每次都需要编译Sql语句，因此性能更好，
+            ResultSet 结果集对象，该对象包含访问查询结果的方法，并且可以通过列索引或列名 获得列数据。。还有一些方法可以移动记录指针的，
+                移动到指定行的时候，通过getXxx方法获取需要的东西，
+        13.3.2 JDBC 的编程步骤
+            1.首先要加载驱动
+                class.forName(DriverClass)
+                在JDBC 驱动中，已经通过SPI自动注册驱动类了，在jar包下的MEt-inf/services 有一个java.sql.Driver文件，如果有这个，可以省略这个。
+            2. 通过DriverManager 获取数据库连接，
+                DriverManager.getConnection(String url,String usr,String pass);
+
+                但是每个驱动程序都是不一样的书写的格式，可是在他们的jar会有编写的格式，你可以去查看，但是当你写的代码多了，你就会记得常见的代码格式。不需要再进行查看。
+
+                然后可以看代码学习；
+            3. 通过COnnection对象创建Statement对象，有三个方法
+            4.使用Statement 执行Sql语句，所有的Statement都有如下的三个方法来执行Sql语句
+                execute  and   executeUpdate and executeQuery
+            5.操作结果集  如果执行的sql是查询语句，执行后返回代表查询结果的ResultSet对象。
+            6. 回收数据库资源包括关闭ResultSet ，Statement和Connection等资源
+                可以利用try-catch来自动关闭各种数据库资源
+
+    13.4 执行Sql语句的方式
+        13.4.1 使用java8 新增的executeLargeUpdate方法执行DDL和DML语句
+            Statement可以有三个方法来执行SQL语句，，
+
+            在dao层中一般，把url和user和password 都写在ini文件里，这样不依靠开发环境，，，不用修改源代码
+            编辑器
+        13.4.2 使用execute 方法执行Sql语句
+            execute几乎可以执行任何Sql语句，但执行的语句非常难得麻烦，所以一般用executeQuery和ExecuteUPDATE方法更简单，
+
+            然后在结果集上面可以用getResultSet 获取该Statement执行查询语句所返回的Resultset对象
+                                 getUpdateCount 获得所影响的记录行数
+
+
+        13.4.3 使用PreparedStatement执行Sql语句
+            如果反复执行一条结构相似的SQL语句，可以使用PreparedStatement 类的，，因为Statement不容许使用问号占位符参数。
+            而且 PreparedStatement 已经预先保存编译好的SQL语句，所以不需要再执行execute方法等。
+
+    13.5 管理结果集
+        jdbc 使用ResultSet 来封装执行查询得到的查询结果，然后通过移动ResultSet的记录指针来取出结果集的内容，。
+        除此之外，jdbc还容许ResultSet来更新记录，并提供了ResultSetMetaData 来获得ResultSet对象的相关信息
+        13.5.1 可滚动、可更新的结果集
+            可以使用absolute previous，afterLast 等方法自由移动记录指针的ResultSet 被称为可滚动的结果集
+        13.5.2 处理Blob类型数据
+            Blob就是二进制长对象的意思，通常用于存储大文件，例如图像或者声音的什么文件比较典型。
+            但是在程序中无法显示Blob的。。只能通过PreparedStatement 的setBinaryStream 的放啊发，指定参数传入二进制流，从而实现Blob数据保存到数据库的功能。
+            当在往出调的时候，可以使用getByte或者getBlob 的方法进行获取二进制数据
+
+            在mysql中，可以使用mediumblob 类型，而不是使用blob，，是因为mediumblob可以存储更大的内容，而blob只能是16kb的大小
+        13.5.3 使用ResultSetMetaData 分析结果集
+            通过这个类可以获取ResultSet的描述信息。
+    13.6 javar 的RowSet
+        RowSet是ResultSet 的子接口。RowSet的好处是可以是可滚动，可更新，可序列化的结果集，而且作为JavaBean使用，
+        这样可以把数据放在内存中，可以减轻数据库服务器的负载，提高程序性能。
+        13.6.1 java7 新增的RowSetFactory 与RowSet
+            这个工厂模式的创建RowSet 实例。
+            可以看APi的文档，里面有5个方法。
+            当时这个工厂模式需要自己再定义数据库的连接方法
+        13.6.2 离线RowSet
+            这个就相当于内存中暂时保存数据，，，而在内存中RowSet就相当于JavaBean中。
+        13.6.3 离线RowSt的查询分页
+            CachedRowSet 会将数据记录直接装载到内存中， 所有CachedRowset 提供了分页功能。，，这样可以防止内存溢出。{在jvm虚拟机中，可说道内存溢出和内存泄露}
+
+            {populate } 使用给定的ResultSet 装填RowSet ，和从什么记录开始装填
+            {setPageSize  一页中可以有什么，previousPage 读取上一页记录， nextPage 下一页记录。
+
+    13.7  事务处理
+        事务是保证底层数据完整的重要手段，没有事务的支持的数据库，那将非常脆弱
+        13.7.1 事务的概念和MYSQL的事务支持
+            事务是由一步或几步数据库操作序列组成的逻辑执行单元，这系列操作要么全部执行，要么全部放弃，一般而言，一个程序包括多个事务
+            具备四个特定：原子性，一致性，持续性，隔离性。
+
+            事务提交的方式： 显示提交（commit）和自动提交
+            事务回滚的方式： 显示回滚（rollback）和自动回滚
+
+
+            当使用set autocommit = 0  相当于关闭自动提交
+            除了上面这个永久的方法以外还有是暂时性的开始事务。
+            start transaction  或 begin 的两个命令都表示临时性开始一次事务
+
+            当事务想要回滚的时候还有savepoint 方法来设置事务的中间点，，
+        13.7.2 JdBC 的事务支持
+            jdbc的事务支持有COnnection提供，默认是自动提交也就是关闭事务，
+
+            当出现异常的时候，系统会非正常退出，事务也会自动回滚，但是如果会捕获，需要再异常处理中回滚事务。
+
+        13.7.3 java8 增强的批量更新
+            就是多条语句一起同时运作的意思。
+                addBatch方法将多条Sql语句同时收集起来。。然后执行，尽量使用executeLargeBatch 因为executeBatch有条数限制。
+
+
+                但是在这块重要的一点就是，不能在里面掺杂查询语句，会导致程序直接出现问题
+    13.8 分析数据库信息
+        13.8.1 使用DatabaseMetaData分析数据库信息
+            这个接口的目的是让用户了解底层数据库的相关信息  包括数据表的数量，存储过程，数量列，主键，外键等信息
+            具体可以看api
+        13.8.2 使用系统表分析数据库信息
+            可以用视图在底层就可以分析出来数据，但是这个会影响性能，。
+            所有这两种方法，，应该适当的时候，选择合适的。
+
+    13.9 使用连接池管理连接
+        数据库中不是增删查改最好费资源是，是建立和关闭连接是最好费资源的，，
+        所以解决办法就是：建立一个连接池，当应用启动的时候，系统主动建立足够的连接，不用了，再归还给连接池，
+
+        连接池的常用参数：{数据库的初始连接数，连接池的最大连接数，连接池的最小连接数，连接池的每次增加的容量}
+        javax.sql.Data.Source  来表示
+
+        13.9.1 DBCP 数据源
+            需要jar包  {commons-dbcp.jar    Commons-pool.jar}
+        13.9.2 C3P0 数据源
+            想比上面的dbcp  这个更胜一筹，不止自动清理Connection还可以清理Statement和ResultSet，，，需要jar包c3p0
+
+

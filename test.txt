@@ -1,0 +1,2 @@
+普通字符串
+com.study.example.PrintStreamTest@4554617c
