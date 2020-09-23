@@ -21,7 +21,7 @@
 4. 服务发现
 
    > 用户不需要使用额外的服务发现机制，就能够基于`kubernetes`自身能力实现服务发现和负载均衡
-   
+
 5. 滚动更新
 
    >可以根据应用的编号，对应用容器运行的应用，进行一次性或批量性更新
@@ -137,6 +137,7 @@
 1. 准备环境
 
    
+
 | 角色   | IP            |
 | ------ | ------------- |
 | master | 192.168.11.11 |
@@ -510,3 +511,386 @@ $ kubectl scale deployment web --replices=10
 
 ```
 
+### service
+
+> 定义一组pod的访问规则
+
+#### 存在意义
+
+> 		1. 防止pod失联（服务发现）
+> 		2. 定义一组Pod访问策略（负载均衡）
+
+#### Pod和Service 关系
+
+一个service 可以由多个pod
+
+#### 常用Service类型
+
+1. ClusterIP： 集群内部使用
+2. NodePort ： 对外访问应用使用
+3. LoadBalancore：对外访问应用使用，公有云
+
+##### ==node内网部署应用，外网一般不能访问怎办==
+
+- nginx 反向代理
+- 手动把结点，添加到nginx里面
+- **其他**
+- 使用loadBalancer： 公有云，把负载均衡，控制器，
+
+#### 部署有状态应用
+
+##### 无状态和有状态区别
+
+###### 无状态
+
+- pod 都是相同的
+- 没有顺序要求
+- 不用考虑在那个node运行
+- 随意进行伸缩和扩展
+
+###### 有状态
+
+- 上面因素都要考虑到
+- 让每个pod 都是独立的，保持pod 的启动顺序和唯一性
+- 唯一的网络标识符，持久存储
+- 有序，比如mysql主从
+
+
+
+##### 部署有状态的应用
+
+1. 无头service——ClusterIP：none
+
+###### 部署——statefulset
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  labels:
+    app: nginx
+spec:
+  ports:
+  - port: 80
+    name: web
+  clusterIP: None  # 这里
+  selector:
+    app: nginx
+
+---
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nginx-statefulset
+  namespace: default
+spec:
+  serviceName: nginx
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+```
+
+![image-20200922213118874](img/image-20200922213118874.png)
+
+###### deployment 和 statefueset区别：有身份，唯一标识
+
+> 根据主机名 + 按照一定规则生成域名
+
+每个pod 有唯一主机名
+
+唯一域名：
+
+```txt
+格式 ： 主机名称.service名称.名称空间.svc.cluster.local
+```
+
+#### 部署守护进程DaemonSet
+
+> 在每个node上运行一个pod，新加入的node也同样运行在一个node里面
+>
+> eg: 在每个node 结点安装数据采集工具
+
+```yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ds-test 
+  labels:
+    app: filebeat
+spec:
+  selector:
+    matchLabels:
+      app: filebeat
+  template:
+    metadata:
+      labels:
+        app: filebeat
+    spec:
+      containers:
+      - name: logs
+        image: nginx
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: varlog
+          mountPath: /tmp/log
+      volumes:
+      - name: varlog
+        hostPath:
+          path: /var/log
+
+```
+
+####  job(一次性任务）
+
+```yaml
+# 一次性任务
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pi
+spec:
+  template:
+    spec:
+      containers:
+      - name: pi
+        image: perl
+        command: ["perl",  "-Mbignum=bpi", "-wle", "print bpi(2000)"]
+      restartPolicy: Never
+  backoffLimit: 4
+
+```
+
+####  cronjob（定时任务）
+
+```yaml
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: hello
+spec:
+  schedule: "*/1 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: hello
+            image: busybox
+            args:
+            - /bin/sh
+            - -c
+            - date; echo Hello from the Kubernetes cluster
+          restartPolicy: OnFailure
+
+
+```
+
+###  Secret
+
+> 作用 ： 加密数据存在etcd里面，让pod容器以挂载Volume方式进行访问
+>
+> 场景： 凭证
+
+1. 创建Secret
+
+   ```yaml
+   # base64 加密后的密码
+   apiVersion: v1
+   kind: Secret
+   metadata:
+     name: mysecret
+   type: Opaque
+   data:
+     username: YWRtaW4=
+     password: MWYyZDFlMmU2N2Rm
+   
+   ```
+
+   kubectl create -f  secret.yaml
+
+2. 以变量的形式挂载pod上
+
+   ```yaml
+   apiVersion: v1
+   kind: Pod
+   metadata:
+     name: mypod
+   spec:
+     containers:
+     - name: nginx
+       image: nginx
+       env:
+         - name: SECRET_USERNAME
+           valueFrom:
+             secretKeyRef:
+               name: mysecret
+               key: username
+         - name: SECRET_PASSWORD
+           valueFrom:
+             secretKeyRef:
+               name: mysecret
+               key: password
+   
+   ```
+
+3. 以volume 形式挂载pod上
+
+   ```yaml
+   apiVersion: v1
+   kind: Pod
+   metadata:
+     name: mypod
+   spec:
+     containers:
+     - name: nginx
+       image: nginx
+       volumeMounts:
+       - name: foo
+         mountPath: "/etc/foo"
+         readOnly: true
+     volumes:
+     - name: foo
+       secret:
+         secretName: mysecret
+   ```
+
+
+##### ConfigMap 
+
+> 作用： 存储不加密数据到etcd ，让pod 以变量或者Volume挂载到容器中
+>
+> 场景：  配置文件
+
+1. 创建配置文件
+
+   ```properties
+   redis.host=127.0.0.1
+   redis.port=6379
+   redis.password=123456
+   ```
+
+2. 创建configMap
+
+   ```shell
+   $ kubectl create configmap redis-config --from-file=redis.properties
+   
+   $ kubectl get cm
+   $ kubectl describe cm redis-config
+   ```
+
+3. 配置yaml文件
+
+   ```yaml
+   apiVersion: v1
+   kind: Pod
+   metadata:
+     name: mypod
+   spec:
+     containers:
+       - name: busybox
+         image: busybox
+         command: [ "/bin/sh","-c","cat /etc/config/redis.properties" ]
+         volumeMounts:
+         - name: config-volume
+           mountPath: /etc/config
+     volumes:
+       - name: config-volume
+         configMap:
+           name: redis-config
+     restartPolicy: Never
+   ```
+
+   
+
+##### 变量的形式
+
+1. 配置文件
+
+   ```yaml
+   apiVersion: v1
+   kind: ConfigMap
+   metadata:
+     name: myconfig
+     namespace: default
+   data:
+     special.level: info
+     special.type: hello
+   ```
+
+2. 挂载
+
+   ```yaml
+   apiVersion: v1
+   kind: Pod
+   metadata:
+     name: mypod
+   spec:
+     containers:
+       - name: busybox
+         image: busybox
+         command: [ "/bin/sh", "-c", "echo $(LEVEL) $(TYPE)" ]
+         env:
+           - name: LEVEL
+             valueFrom:
+               configMapKeyRef:
+                 name: myconfig
+                 key: special.level
+           - name: TYPE
+             valueFrom:
+               configMapKeyRef:
+                 name: myconfig
+                 key: special.type
+     restartPolicy: Never
+   
+   ```
+
+### 集群的安全机制
+
+#### 概述
+
+1. 访问k8s集群时候，需要经过三个步骤完成具体操作
+
+   - 认证
+   - 鉴权（授权）
+   - 准入控制
+
+2. 进行访问的时候，过程中都需要经过apiserver，做统一协调，比如门卫，
+
+   访问过程中需要整数，token，或者用户名+密码
+
+   如果访问pod需要serviceAccount
+
+#### 第一步认证：传输安全
+
+- 传输安全： 对外不暴露8080端口，只能内部访问，对外使用6443
+
+- 认证
+
+  > 客户端身份认证常用方式：
+  >
+  > 1. https证书
+  > 2. token
+  > 3. 用户名 + 密码
+
+#### 第二步 鉴权
+
+- 基于RBAC进行鉴权
+- 基于角色访问控制
+
+#### 第三步 准入控制
+
+- 就是准入控制器的列表，如果列表有请求内容通过，没有拒绝
