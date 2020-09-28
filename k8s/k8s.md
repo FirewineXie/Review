@@ -894,3 +894,729 @@ spec:
 #### 第三步 准入控制
 
 - 就是准入控制器的列表，如果列表有请求内容通过，没有拒绝
+
+
+
+#### 集群安全机制
+
+##### 创建命名空间
+
+```shell
+$ kubectl create ns demo
+```
+
+##### 新的命名空间创建pod
+
+```shell
+$ kubectl run  nginx --image=nginx -n demo 
+```
+
+##### 创建角色
+
+```yaml
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  namespace: demo
+  name: pod-reader
+rules:
+- apiGroups: [""] # "" indicates the core API group
+  resources: ["pods"]
+  verbs: ["get", "watch", "list"]
+
+```
+
+
+
+```shell
+$ kubectl apply -f rabc.yaml
+$ kubectl get role -n demo
+```
+
+##### 使用证书识别身份
+
+```sh
+cat > mary-csr.json <<EOF
+{
+  "CN": "mary",
+  "hosts": [],
+  "key": {
+    "algo": "rsa",
+    "size": 2048
+  },
+  "names": [
+    {
+      "C": "CN",
+      "L": "BeiJing",
+      "ST": "BeiJing"
+    }
+  ]
+}
+EOF
+
+cfssl gencert -ca=ca.pem -ca-key=ca-key.pem -config=ca-config.json -profile=kubernetes mary-csr.json | cfssljson -bare mary 
+
+kubectl config set-cluster kubernetes \
+  --certificate-authority=ca.pem \
+  --embed-certs=true \
+  --server=https://192.168.31.63:6443 \
+  --kubeconfig=mary-kubeconfig
+  
+kubectl config set-credentials mary \
+  --client-key=mary-key.pem \
+  --client-certificate=mary.pem \
+  --embed-certs=true \
+  --kubeconfig=mary-kubeconfig
+
+kubectl config set-context default \
+  --cluster=kubernetes \
+  --user=mary \
+  --kubeconfig=mary-kubeconfig
+
+kubectl config use-context default --kubeconfig=mary-kubeconfig
+
+```
+
+### Ingress
+
+> 1.  把端口对外暴露，通过对ip+ 端口号进行访问
+>
+>    ==使用Service里面的nodePort实现==
+>
+> 2. nodeport 缺陷
+>
+>    ==在每个节点上都会起到端口，在访问时候通过任何结点，通过节点ip+端口号实现访问==
+>
+>    ==意味着每个端口只能使用一次，一个端口对应一个应用==
+>
+>    ==实际访问中都是用域名，根据不同域名跳转到不同的端口服务中心==
+
+##### port 与 Ingress 的关联
+
+>  pod 和ingress 通过service关联的
+>
+> ingress作为统一入口，有service关联一组pod
+
+#### ingress 工作流程
+
+![image-20200924220742522](img/image-20200924220742522.png)
+
+#### 使用
+
+#####  部署ingress Controller
+
+#####  创建ingress 规则（官方维护的nginx控制器）
+
+1. 创建nginx
+
+   ```shell
+   $ kubectl create deployment web --image=nginx 
+   $ kubectl expose deployment web --port=80 --target-port=80 --type=NodePort
+   ```
+
+2. 部署ingress Controller
+
+   ```yaml
+   apiVersion: v1
+   kind: Namespace
+   metadata:
+     name: ingress-nginx
+     labels:
+       app.kubernetes.io/name: ingress-nginx
+       app.kubernetes.io/part-of: ingress-nginx
+   
+   ---
+   
+   kind: ConfigMap
+   apiVersion: v1
+   metadata:
+     name: nginx-configuration
+     namespace: ingress-nginx
+     labels:
+       app.kubernetes.io/name: ingress-nginx
+       app.kubernetes.io/part-of: ingress-nginx
+   
+   ---
+   kind: ConfigMap
+   apiVersion: v1
+   metadata:
+     name: tcp-services
+     namespace: ingress-nginx
+     labels:
+       app.kubernetes.io/name: ingress-nginx
+       app.kubernetes.io/part-of: ingress-nginx
+   
+   ---
+   kind: ConfigMap
+   apiVersion: v1
+   metadata:
+     name: udp-services
+     namespace: ingress-nginx
+     labels:
+       app.kubernetes.io/name: ingress-nginx
+       app.kubernetes.io/part-of: ingress-nginx
+   
+   ---
+   apiVersion: v1
+   kind: ServiceAccount
+   metadata:
+     name: nginx-ingress-serviceaccount
+     namespace: ingress-nginx
+     labels:
+       app.kubernetes.io/name: ingress-nginx
+       app.kubernetes.io/part-of: ingress-nginx
+   
+   ---
+   apiVersion: rbac.authorization.k8s.io/v1beta1
+   kind: ClusterRole
+   metadata:
+     name: nginx-ingress-clusterrole
+     labels:
+       app.kubernetes.io/name: ingress-nginx
+       app.kubernetes.io/part-of: ingress-nginx
+   rules:
+     - apiGroups:
+         - ""
+       resources:
+         - configmaps
+         - endpoints
+         - nodes
+         - pods
+         - secrets
+       verbs:
+         - list
+         - watch
+     - apiGroups:
+         - ""
+       resources:
+         - nodes
+       verbs:
+         - get
+     - apiGroups:
+         - ""
+       resources:
+         - services
+       verbs:
+         - get
+         - list
+         - watch
+     - apiGroups:
+         - ""
+       resources:
+         - events
+       verbs:
+         - create
+         - patch
+     - apiGroups:
+         - "extensions"
+         - "networking.k8s.io"
+       resources:
+         - ingresses
+       verbs:
+         - get
+         - list
+         - watch
+     - apiGroups:
+         - "extensions"
+         - "networking.k8s.io"
+       resources:
+         - ingresses/status
+       verbs:
+         - update
+   
+   ---
+   apiVersion: rbac.authorization.k8s.io/v1beta1
+   kind: Role
+   metadata:
+     name: nginx-ingress-role
+     namespace: ingress-nginx
+     labels:
+       app.kubernetes.io/name: ingress-nginx
+       app.kubernetes.io/part-of: ingress-nginx
+   rules:
+     - apiGroups:
+         - ""
+       resources:
+         - configmaps
+         - pods
+         - secrets
+         - namespaces
+       verbs:
+         - get
+     - apiGroups:
+         - ""
+       resources:
+         - configmaps
+       resourceNames:
+         # Defaults to "<election-id>-<ingress-class>"
+         # Here: "<ingress-controller-leader>-<nginx>"
+         # This has to be adapted if you change either parameter
+         # when launching the nginx-ingress-controller.
+         - "ingress-controller-leader-nginx"
+       verbs:
+         - get
+         - update
+     - apiGroups:
+         - ""
+       resources:
+         - configmaps
+       verbs:
+         - create
+     - apiGroups:
+         - ""
+       resources:
+         - endpoints
+       verbs:
+         - get
+   
+   ---
+   apiVersion: rbac.authorization.k8s.io/v1beta1
+   kind: RoleBinding
+   metadata:
+     name: nginx-ingress-role-nisa-binding
+     namespace: ingress-nginx
+     labels:
+       app.kubernetes.io/name: ingress-nginx
+       app.kubernetes.io/part-of: ingress-nginx
+   roleRef:
+     apiGroup: rbac.authorization.k8s.io
+     kind: Role
+     name: nginx-ingress-role
+   subjects:
+     - kind: ServiceAccount
+       name: nginx-ingress-serviceaccount
+       namespace: ingress-nginx
+   
+   ---
+   apiVersion: rbac.authorization.k8s.io/v1beta1
+   kind: ClusterRoleBinding
+   metadata:
+     name: nginx-ingress-clusterrole-nisa-binding
+     labels:
+       app.kubernetes.io/name: ingress-nginx
+       app.kubernetes.io/part-of: ingress-nginx
+   roleRef:
+     apiGroup: rbac.authorization.k8s.io
+     kind: ClusterRole
+     name: nginx-ingress-clusterrole
+   subjects:
+     - kind: ServiceAccount
+       name: nginx-ingress-serviceaccount
+       namespace: ingress-nginx
+   
+   ---
+   
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: nginx-ingress-controller
+     namespace: ingress-nginx
+     labels:
+       app.kubernetes.io/name: ingress-nginx
+       app.kubernetes.io/part-of: ingress-nginx
+   spec:
+     replicas: 1
+     selector:
+       matchLabels:
+         app.kubernetes.io/name: ingress-nginx
+         app.kubernetes.io/part-of: ingress-nginx
+     template:
+       metadata:
+         labels:
+           app.kubernetes.io/name: ingress-nginx
+           app.kubernetes.io/part-of: ingress-nginx
+         annotations:
+           prometheus.io/port: "10254"
+           prometheus.io/scrape: "true"
+       spec:
+         hostNetwork: true
+         # wait up to five minutes for the drain of connections
+         terminationGracePeriodSeconds: 300
+         serviceAccountName: nginx-ingress-serviceaccount
+         nodeSelector:
+           kubernetes.io/os: linux
+         containers:
+           - name: nginx-ingress-controller
+             image: lizhenliang/nginx-ingress-controller:0.30.0
+             args:
+               - /nginx-ingress-controller
+               - --configmap=$(POD_NAMESPACE)/nginx-configuration
+               - --tcp-services-configmap=$(POD_NAMESPACE)/tcp-services
+               - --udp-services-configmap=$(POD_NAMESPACE)/udp-services
+               - --publish-service=$(POD_NAMESPACE)/ingress-nginx
+               - --annotations-prefix=nginx.ingress.kubernetes.io
+             securityContext:
+               allowPrivilegeEscalation: true
+               capabilities:
+                 drop:
+                   - ALL
+                 add:
+                   - NET_BIND_SERVICE
+               # www-data -> 101
+               runAsUser: 101
+             env:
+               - name: POD_NAME
+                 valueFrom:
+                   fieldRef:
+                     fieldPath: metadata.name
+               - name: POD_NAMESPACE
+                 valueFrom:
+                   fieldRef:
+                     fieldPath: metadata.namespace
+             ports:
+               - name: http
+                 containerPort: 80
+                 protocol: TCP
+               - name: https
+                 containerPort: 443
+                 protocol: TCP
+             livenessProbe:
+               failureThreshold: 3
+               httpGet:
+                 path: /healthz
+                 port: 10254
+                 scheme: HTTP
+               initialDelaySeconds: 10
+               periodSeconds: 10
+               successThreshold: 1
+               timeoutSeconds: 10
+             readinessProbe:
+               failureThreshold: 3
+               httpGet:
+                 path: /healthz
+                 port: 10254
+                 scheme: HTTP
+               periodSeconds: 10
+               successThreshold: 1
+               timeoutSeconds: 10
+             lifecycle:
+               preStop:
+                 exec:
+                   command:
+                     - /wait-shutdown
+   
+   ---
+   
+   apiVersion: v1
+   kind: LimitRange
+   metadata:
+     name: ingress-nginx
+     namespace: ingress-nginx
+     labels:
+       app.kubernetes.io/name: ingress-nginx
+       app.kubernetes.io/part-of: ingress-nginx
+   spec:
+     limits:
+     - min:
+         memory: 90Mi
+         cpu: 100m
+       type: Container
+   
+   ```
+
+3. ingress01 里面的模拟网站
+
+   ```yaml
+   apiVersion: networking.k8s.io/v1beta1
+   kind: Ingress
+   metadata:
+     name: example-ingress
+   spec:
+     rules:
+     - host: example.ingredemo.com
+       http:
+         paths:
+         - path: /
+           backend:
+             serviceName: web
+             servicePort: 80
+   
+   ```
+
+### Helm
+
+   > 使用helm 可以将yaml 作为一个整体管理
+   >
+   > 实现yaml高效复用
+   >
+   > 使用helm应用级别的版本管理
+
+#### 介绍
+
+> helm 是一个 k8s 的包管理工具，就像linux 的包管理器，如yum等，可以很方便的将之前打包好的yaml文件部署到k8s中
+
+#### 三个很重要的概念
+
+##### helm
+
+> 命令行客户端工具
+
+
+
+#####  chart
+
+> 把yaml文件打包，是yaml 集合
+
+##### release
+
+> 基于chart部署实体，应用级别的版本管理
+
+#### 安装
+
+下载压缩文件
+
+解压文件到usr/bin目录下
+
+#### 配置helm仓库
+
+##### 添加仓库
+
+```shell
+$ helm repo add stable url
+$ helm repo update
+
+# 删除仓库
+$ helm repo remove stable
+```
+
+<img src="img/image-20200925212443533.png" alt="image-20200925212443533" style="zoom:150%;" />
+
+#### 使用helm 快速部署应用
+
+##### 命令搜索应用
+
+helm search repo 名称
+
+##### 根据搜索选择安装
+
+helm install 安装后名称  搜索之后名称
+
+##### 查看安装后状态
+
+helm list
+
+helm status 名称
+
+#### 自定义chart
+
+##### 使用命令创建chart
+
+```shell
+$ helm create chart 名称
+# 生成模板
+```
+
+- 模板文件介绍
+  - chartyaml ： 当前chart 属性配置信息
+  - templates ： 编写yaml 文件放到这个目录中
+  - values.yaml ： yaml 文件可以使用全局变量
+- 例如在 templates
+  - 创建deployment文件
+  - 创建service.yaml文件
+
+##### 安装
+
+helm install web1  mychart/
+
+#### 应用升级
+
+helm upgrade web1 mychart
+
+
+
+#### 实现yaml 高效复用
+
+> 通过传递参数，动态渲染模板，yaml内容动态传入参数生成
+>
+> ==在chart有varlues。yaml文件，定义yaml文件去全局变量==
+
+
+
+##### yaml 文件大体有几个地方不同的
+
+```txt
+image
+tag
+label
+port
+replicas
+```
+
+在values.yaml定义变量和值
+
+```yaml
+replicas:1
+image:nginx
+tag:1.16
+label:nginx
+port : 80
+```
+
+在templates 的yaml 文件使用全局变量
+
+```yaml
+# 通过表达式形式使用全局变量
+{{.Values.变量名称}}
+```
+
+
+
+### 持久化存储
+
+##### nfs网络存储
+
+> pod 重启，数据还存在的
+
+1. yum install nfs-utils -y
+
+```shell
+vim /etc/exports
+# 设置挂载路径
+/data/nfs *{rw,no_root_squash}
+# 路径必须存在
+```
+
+2. k8s 节点，必须也要安装（会自动挂载）
+
+3. 启动nfs服务
+
+4. yaml文件
+
+   ```yaml
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     name: nginx-dep1
+   spec:
+     replicas: 1
+     selector:
+       matchLabels:
+         app: nginx
+     template:
+       metadata:
+         labels:
+           app: nginx
+       spec:
+         containers:
+         - name: nginx
+           image: nginx
+           volumeMounts:
+           - name: wwwroot
+             mountPath: /usr/share/nginx/html
+           ports:
+           - containerPort: 80
+         volumes:
+           - name: wwwroot
+             nfs:
+               server: 192.168.44.134
+               path: /data/nfs
+   ```
+
+
+#####  pV和 PVC 存储
+
+> PV : 持久化存储，对存储资源进行抽象，对外提供可以调用的地方（生产者）
+>
+> PVC ： 用于调用，不需要关系内部实现细节（消费者）
+
+- 实现流程
+
+  ```yaml
+  # PV 文件
+  apiVersion: v1
+  kind: PersistentVolume
+  metadata:
+    name: my-pv
+  spec:
+    capacity:
+      storage: 5Gi
+    accessModes:
+      - ReadWriteMany
+    nfs:
+      path: /k8s/nfs
+      server: 192.168.44.134
+  ```
+
+  ```yaml
+  # PVC 文件
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: nginx-dep1
+  spec:
+    replicas: 3
+    selector:
+      matchLabels:
+        app: nginx
+    template:
+      metadata:
+        labels:
+          app: nginx
+      spec:
+        containers:
+        - name: nginx
+          image: nginx
+          volumeMounts:
+          - name: wwwroot
+            mountPath: /usr/share/nginx/html
+          ports:
+          - containerPort: 80
+        volumes:
+        - name: wwwroot
+          persistentVolumeClaim:
+            claimName: my-pvc
+  
+  ---
+  
+  apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: my-pvc
+  spec:
+    accessModes:
+      - ReadWriteMany
+    resources:
+      requests:
+        storage: 5Gi
+  ```
+
+  
+
+### 集群资源监控
+
+#### 监控指标
+
+##### 集群监控
+
+1. 结点资源利用率
+2. 结点数
+3. 运行pods
+
+
+
+##### pod解控
+
+1. 容器指标
+2. 应用程序
+
+#### 监控平台搭建方案
+
+> prometheus + Grafana
+
+##### prometheus
+
+> 1. 开源的
+> 2. 监控、报警、数据库
+> 3. 以http协议周期性抓取被监控组件状态
+> 4. 不需要复杂的集成过程，使用http接口接入就可以了
+
+##### Grafana
+
+> 开源的数据分析和可视化界面
+>
+> 支持多种数据库
+
+配置文件
+
+node-exporter.yaml 守护文件
+
