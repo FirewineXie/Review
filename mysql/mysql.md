@@ -741,6 +741,136 @@ MASTER_LOG_POS=$master_log_pos
 > 1. kill query + 线程id
 > 2. kill connection + 线程id
 
+原因 ： 
+
+1. 线程没有执行到判断线程状态的逻辑
+2. 终止逻辑耗时较长 
+
 ### 查大量数据，数据库内存会不会爆
 
+对于正常的线上业务来说：如果一个查询的返回结果不会很多的话，建议使用mysql_store_result 这个接口，直接把查询结果保存到本地内存
+
 ### 到底可不可以使用join
+
+> join语句执行过程中，驱动表是走==全表扫描==，而被驱动表是走==走树搜索==
+
+1. 使用join语句，性能比强行拆成多个单表执行sql语句的性能要好
+2. 如果使用join语句的话，需要让小表做驱动表
+3. ==前提==可以使用被驱动表的索引
+4. **在决定哪个表做驱动表的时候，应该是两个表按照各自的条件过滤，过滤完成之后，计算参与join的各个字段的总数据量，数据量小的那个表，就是 “小表”，应该作为驱动表**
+
+###  join 语句怎么优化
+
+> 大多数的数据都是按照主键递增顺序插入得到的，所以我们可以认为，如果按照主键的递增顺序查询的话，对磁盘的读比较接近顺序读，能够提交读性能。
+
+### 为什么临时表可以重名
+
+> 临时表 ： 就是内存表
+>
+> 内存表 ： 指的是使用Memory 引擎的表，建表语法是create table ... engine=memory。 这种表的数据都保存在内存里，系统重启的时候会被清空，但是表结构还在。除了这两个特性看上去比较“奇怪”外，从其他的特征上看，他就是一个正常的表。
+>
+> 临时表 ： 可以使用各种引擎类型。如果是使用InnoDB引擎或者MyISAM 引擎 的临时表，写数据的时候是写到磁盘上的。当然，临时表也可以使用Memory 引擎。
+
+### 什么时候会使用内部临时表
+
+1. 使用union 执行流程
+2. group by 执行流程
+
+### 自增主键为什么不是连续的
+
+由于自增主键，可以让主键索引尽量地保持递增顺序插入，避免了页分裂，因此索引更紧凑，
+
+但是自增主键不是连续递增的
+
+
+
+表的结构定义存放在后缀名为.frm的文件汇总，但是并不会保存自增值
+
+
+
+1. 唯一冲突是导致自增主键id不连续的第一种原因
+2. 事务回滚也会产生类似的现象，这就是第二种原因
+
+
+
+
+
+### 如何最快的复制一张表
+
+1. mysqldump 方法
+
+   >
+   >
+   >mysqldump -h$host -P$port -u$user --add-locks=0 --no-create-info --single-transaction  --set-gtid-purged=OFF db1 t --where="a>900" --result-file=/client_tmp/t.sql
+
+- single-transaction 作用是：在导出数据的时候不需要对原表加表锁，而是使用START TRANSACTION WITH CONSISTENT SNAPSHOT 的方法；
+- add-locks 设置为0，表示在输出的文件结果里，不增加“LOCK TABLES t WRITE”
+- no-create-info 的意思是 ： 不需要导出表结构
+- set-gtid-purged=off 表示的是，不输出跟GTID相关的信息
+- result-file 指定了输出文件的路径，其中client表示生成的文件是在客户端机器上的
+
+2. 导出 csv 文件
+
+   > select * from db1.t where a>900 into outfile '/server_tmp/t.csv';
+
+   - 这条语句会将结果保存在服务端，如果你执行命令的客户端和mysql 服务端不在同一个机器上，客户端机器的临时目录下是不会生成csv文件的
+   - into outfile 指定了文件的生成位置/server_tmp/ ,这个位置必须参数secure_file_priv的限制，参数secure_file_priv的可选值和作用分别是：
+     - empty ： 表示不限制文件生成位置，不安全的设置
+     - 设置一个表示路径的字符串，就要求生成的文件只能放在这个指定的目录，或者他的子目录
+     - 设置为null，就表示禁止在这个mysql实例上执行select ... into outfile 操作
+   - 不会覆盖文件，存在相同文件会报错
+   - 生成文件中，原则上一个数据行对应文本文件的一行。出现换行符会有转义字符
+
+   >
+   >
+   >load data infile '/server_tmp/t.csv' into table db2.t;
+
+### grant之后要跟着flush privileges 吗
+
+grant 是用来用户赋权的
+
+赋最高权限：
+
+> grant all privileges on *.* to 'ua'@'%' with grant option;
+>
+> 收回
+>
+> revoke all privileges on *.* from 'ua'@'%';
+
+db权限
+
+> grant all privileges on db1.* to 'ua'@'%' with grant option;
+
+表权限 和列权限
+
+> create table db1.t1(id int, a int);
+>
+> grant all privileges on db1.t1 to 'ua'@'%' with grant option;
+> GRANT SELECT(id), INSERT (id,a) ON mydb.mytbl TO 'ua'@'%' with grant option;
+
+**正常情况下，grant命令之后，没有必要跟着flush privileges 命令**
+
+==flush privileges==
+
+当数据表中的权限数据跟内存中的权限数据不一致的时候，
+
+可以 用来重建内存数据，达到一致状态
+
+
+
+### 自增id用完怎么办
+
+thread_id ： 线程id
+
+trx_id : 事务id，只读事务不会分配id
+
+Xid 是有server 层维护的，InnoDb 内部使用XID，就是为了能够在InnoDb事务和server之间做关联
+
+XId ： 是redo log 和binlog 的共同字段，用来对应事务的
+
+1. 表的自增id达到上限后，再申请时他的值就不会改变，进而导致继续插入数据时报主键冲突的错误
+2. row_id 达到上限后，则会归0 在重新递增，如果出现相同的row_id ，后写的数据会覆盖之前的数据
+3. xid 只需要不在同一个binglog 文件中出现重复值即可。虽然理论会出现重复值，但是概率极小
+4. InnoDb 的max_trx_id 递增值每次mysql 重启都会被保存起来，
+5. thread_id 是我们使用中最常见，而且是处理的最好的一个自增id逻辑了。
+
