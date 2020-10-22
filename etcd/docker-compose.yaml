@@ -1,0 +1,76 @@
+version: '2'
+services:
+  etcd1:
+    image: elcolio/etcd
+    command: etcd -name etcd1 -advertise-client-urls http://0.0.0.0:2379 -listen-client-urls http://0.0.0.0:2379 -listen-peer-urls http://0.0.0.0:2380 -initial-cluster-token etcd-cluster -initial-cluster "etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380" -initial-cluster-state new
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+      - "4001:4001"
+    user: root
+    volumes:
+      - "/var/docekr/etcd/data:/opt/etcds/etcd1/data"
+    networks:
+      etcds:
+        ipv4_address: 172.17.0.100
+    hostname: etcd1
+    extra_hosts:
+      - "etcd1:172.17.0.100"
+      - "etcd2:172.17.0.101"
+      - "etcd3:172.17.0.102"
+
+  etcd2:
+    image: elcolio/etcd
+    command: etcd -name etcd2 -advertise-client-urls http://0.0.0.0:2379 -listen-client-urls http://0.0.0.0:2379 -listen-peer-urls http://0.0.0.0:2380 -initial-cluster-token etcd-cluster -initial-cluster "etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380" -initial-cluster-state new
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+      - "4001:4001"
+    user: root
+    volumes:
+      - "/var/docekr/etcd/data:/opt/etcds/etcd1/data"
+    networks:
+      etcds:
+        ipv4_address: 172.17.0.101
+    hostname: etcd2
+    extra_hosts:
+      - "etcd1:172.17.0.100"
+      - "etcd2:172.17.0.101"
+      - "etcd3:172.17.0.102"
+
+
+  etcd3:
+    image: elcolio/etcd
+    command: etcd -name etcd3 -advertise-client-urls http://0.0.0.0:2379 -listen-client-urls http://0.0.0.0:2379 -listen-peer-urls http://0.0.0.0:2380 -initial-cluster-token etcd-cluster -initial-cluster "etcd1=http://etcd1:2380,etcd2=http://etcd2:2380,etcd3=http://etcd3:2380" -initial-cluster-state new
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+      - "4001:4001"
+    user: root
+    volumes:
+      - "/var/docekr/etcd/data:/opt/etcds/etcd1/data"
+    networks:
+      etcds:
+        ipv4_address: 172.17.0.102
+    hostname: etcd3
+    extra_hosts:
+      - "etcd1:172.17.0.100"
+      - "etcd2:172.17.0.101"
+      - "etcd3:172.17.0.102"
+
+  e3w:
+    hostname: e3w
+    image: soyking/e3w:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - "/var/docker/e3w/conf/config.ini:/app/conf/config.default.ini"
+    networks:
+      etcds:
+        ipv4_address: 172.17.0.103
+networks:
+  etcds:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.17.0.0/16

@@ -430,3 +430,354 @@ sendCond := sync.NewCond(&lock)
 recvCond := sync.NewCond(lock.RLocker())
 ```
 
+
+## 并发安全的sync.Map ，已知 go自带的map结构不是并发安全的
+
+
+
+sync.map 对键的要求： 不能是函数类型、字典类型和切片类型
+
+我们必须保证键的类型是可比较的（或者说可判等的）。如果你实在拿不准，那么可以先通过调用`reflect.TypeOf`函数得到一个键值对应的反射类型值（即：`reflect.Type`类型的值），然后再调用这个值的`Comparable`方法，得到确切的判断结果。
+
+
+
+### 知识扩展
+
+1. 保证并发安全字段中的键和值的类型正确性
+
+   - 使用类型断言表达式或者反射操作来保证他们类型正确性
+
+   1. 第一种方案 ： 让并发安全字典只能存储某个特定类型的值
+
+      ```go
+      type IntStrMap struct {
+       m sync.Map
+      }
+      
+      func (iMap *IntStrMap) Delete(key int) {
+       iMap.m.Delete(key)
+      }
+      
+      func (iMap *IntStrMap) Load(key int) (value string, ok bool) {
+       v, ok := iMap.m.Load(key)
+       if v != nil {
+        value = v.(string)
+       }
+       return
+      }
+      
+      func (iMap *IntStrMap) LoadOrStore(key int, value string) (actual string, loaded bool) {
+       a, loaded := iMap.m.LoadOrStore(key, value)
+       actual = a.(string)
+       return
+      }
+      
+      func (iMap *IntStrMap) Range(f func(key int, value string) bool) {
+       f1 := func(key, value interface{}) bool {
+        return f(key.(int), value.(string))
+       }
+       iMap.m.Range(f1)
+      }
+      
+      func (iMap *IntStrMap) Store(key int, value string) {
+       iMap.m.Store(key, value)
+      }
+      ```
+
+   2. 方案二：重写sync.map 类型的所有方法，但是另写类型检查
+
+      ```go
+      type ConcurrentMap struct {
+       m         sync.Map
+       keyType   reflect.Type
+       valueType reflect.Type
+      }
+      
+      // 类型代表的是 ： 可自定义键类型和值类型的并发安全字段。
+      // m代表这内部使用的并发安全字典
+      // key value type  分别用于保存键类型和值类型，这两个字段都是反射类型
+      // 例如  reflect.TypeOF
+      func (cMap *ConcurrentMap) Load(key interface{}) (value interface{}, ok bool) {
+       if reflect.TypeOf(key) != cMap.keyType {
+        return
+       }
+       return cMap.m.Load(key)
+      }
+      ```
+
+2. 并发安全字典如何做到尽量避免使用锁
+
+   sync.Map 类型在内部使用了大量的原子操作来获取键和值，并使用了两个原始的map 作为存储介质
+
+   - 第一个原生map 被存在了sync.map 的read字段中，字段类型为sync/atomic.value类型。相当于一个快照，每次保存sync.map里面的数据
+   - 另一个原生字典是dirty字段代表，他存储键值对的方式与read字段中的原生字典一直，他的键类型为interface{} ，并且同样是把值先做转换和封装后再进行存储的。
+
+
+
+## unicode与字符编码
+
+### go语言经典知识总结
+
+> 基于混合线程的并发编程模型
+
+#### 数据类型方法
+
+- 基于底层数组的切片
+- 用来传递数据的通道
+- 作为一等类型的函数
+- 可实现面向对象的结构体
+- 能无侵入实现的接口等
+
+#### 语法
+
+1. 异步编程神器go语句
+2. 函数的最后关卡defer语句
+3. 可做类型判断的switch语句
+4. 多通道操作力气select语句
+5. 非常有特色的异常处理函数panic 和recover
+
+#### 测试go程序
+
+1. 独立的测试源码文件
+2. 三种功用不同的测试函数
+3. 专用的testing代码包
+4. 功能强大的go test命令
+
+
+
+#### 同步工具
+
+1. 经典的互斥锁
+2. 读写锁
+3. 条件变量
+4. 原子操作
+
+#### 特有的数据类型
+
+1. 单此执行小助手sync.Once
+2. 临时对象池sync.Pool
+3. 帮助我们实现多goroutine协作流程的sync.WaitGroup、context.Context
+4. 一种高效的并发安全字典sync.Map
+
+
+
+
+
+### go语言的字符编程基础
+
+go语言中的标识符可以包含“任何Unicode 编码可以表示的字母字符”。
+
+当一个 string 类型的值被转换为[]rune 类型值的时候，其中的字符串会被拆分成一个一个unicode字符
+
+即 ： go 语言，必须使用utf-8 格式进行保存，不然构建会发生错误
+
+
+
+#### 问题
+
+1. 一个string 类型的值，如何在底层是怎么表达的
+
+   > 是在底层，一个string类型的值是由一系列相对应的unicode代码点的utf-8编码值来表达式
+
+   总之，一个`string`类型的值会由若干个Unicode字符组成，每个Unicode字符都可以由一个`rune`类型的值来承载。
+
+2. 使用range 子句的for语句遍历字符串值的时候应该注意什么
+
+   > 带有range子句的for语句，会先把被遍历的字符串拆成一个字节序列，然后使用找出这个字节序列中包含每一个utf-8编码值，也就是unicode字符
+
+
+
+## strings 包与字符串操作
+
+> 与string值相比，strings.Builder 类型的值有哪些优势
+
+strings.builder 类型的值 优势有下面的三种：
+
+1. 已存在的内容不可变，但可以拼接更多的内容
+2. 减少了内存分配和内容拷贝的次数
+3. 可将内容重置，可重用值
+
+
+
+string 是众所周知 ，，是采用 一连续的内存空间进行保存，如果进行字符串改变，会增加内存压力，
+
+
+
+而 builder  的优势就是字符串拼接方面，
+
+Builder 值中有一个用于承载内容的容器，。他是一个以byte为元素类型的切片
+
+实际上：他们都是通过一个unsafe.Pointer 类型的字段来持有那个指向底层字节数组的指针值的，同样拥有高效利用内存的前提条件。
+
+**虽然字节切片本身可以肆意修改，但是builder值不容许这样做，其中的内容只能够拼接或者完全重置**
+
+扩容就是; 就是原容器容量的二倍再加上n，然后将原数据拷贝新容器中
+
+
+
+#### strings.Reader 类型的值可以高效的读取字符串
+
+> 在读取的机制上，它封装了很多用于在string值上读取内容的最佳实践，在读取的过程中，Reader 值会保存已读取的字节的计数（已读计数）
+
+Reader
+
+
+
+
+
+## io包中的接口和工具
+
+**`strings.Builder`类型主要用于构建字符串**，它的指针类型实现的接口有`io.Writer`、`io.ByteWriter`和`fmt.Stringer`。另外，它其实还实现了一个`io`包的包级私有接口`io.stringWriter`（自Go 1.12起它会更名为`io.StringWriter`）。
+
+**`strings.Reader`类型主要用于读取字符串**，它的指针类型实现的接口比较多，包括：
+
+1. `io.Reader`；
+2. `io.ReaderAt`；
+3. `io.ByteReader`；
+4. `io.RuneReader`；
+5. `io.Seeker`；
+6. `io.ByteScanner`；
+7. `io.RuneScanner`；
+8. `io.WriterTo`；
+
+**`bytes.Buffer`是集读、写功能于一身的数据类型，它非常适合作为字节序列的缓冲区。** 
+
+更具体地说，该指针类型实现的读取相关的接口有下面几个。
+
+1. `io.Reader`；
+2. `io.ByteReader`；
+3. `io.RuneReader`；
+4. `io.ByteScanner`；
+5. `io.RuneScanner`；
+6. `io.WriterTo`；
+
+共有6个。而其实现的写入相关的接口则有这些。
+
+1. `io.Writer`；
+2. `io.ByteWriter`；
+3. `io.stringWriter`；
+4. `io.ReaderFrom`；
+
+共4个。此外，它还实现了导出相关的接口`fmt.Stringer`。
+
+
+
+
+
+拷贝数据的包
+
+在`io`包中，有这样几个用于拷贝数据的函数，它们是：
+
+- `io.Copy`；
+- `io.CopyBuffer`；
+- `io.CopyN`。
+
+在实际的面试中，只要应聘者能够从某一个方面出发，说出`io.Reader`的扩展接口及其存在意义，或者说清楚该接口的三五个实现类型，那么就可以算是基本回答正确了。
+
+比如，从读取、写入、关闭这一些列的基本功能出发，描述清楚：
+
+- `io.ReadWriter`；
+- `io.ReadCloser`；
+- `io.ReadWriteCloser；`
+
+这几个接口。
+
+又比如，说明白`io.LimitedReader`和`io.SectionReader`这两个类型之间的异同点。
+
+再比如，阐述`*io.SectionReader`类型实现`io.ReadSeeker`接口的具体方式，等等。不过，这只是合格的门槛，应聘者回答得越全面越好。
+
+我在示例文件demo82.go中写了一些代码，以展示上述类型的一些基本用法，供你参考。
+
+==核心接口： reader,writer,close==
+
+简单接口分为四大类  ： 读取 ，写入，关闭和读写位置设定
+
+
+
+## 使用os包的api
+
+os.file 下面是所实现的接口
+
+首先，对于`io`包中最核心的3个简单接口`io.Reader`、`io.Writer`和`io.Closer`，`*os.File`类型都实现了它们。
+
+其次，该类型还实现了另外的3个简单接口，即：`io.ReaderAt`、`io.Seeker`和`io.WriterAt`。
+
+
+
+#### File值的操作模式都有哪些
+
+操作模式 ：  只读模式、只写模式，读写模式
+
+这些模式分别由常量`os.O_RDONLY`、`os.O_WRONLY`和`os.O_RDWR`代表。在我们新建或打开一个文件的时候，必须把这三个模式中的一个设定为此文件的操作模式。
+
+- `os.O_APPEND`：当向文件中写入内容时，把新内容追加到现有内容的后边。
+- `os.O_CREATE`：当给定路径上的文件不存在时，创建一个新文件。
+- `os.O_EXCL`：需要与`os.O_CREATE`一同使用，表示在给定的路径上不能有已存在的文件。
+- `os.O_SYNC`：在打开的文件之上实施同步I/O。它会保证读写的内容总会与硬盘上的数据保持同步。
+- `os.O_TRUNC`：如果文件已存在，并且是常规的文件，那么就先清空其中已经存在的任何内容。
+
+#### 如何设置常规文件的访问权限
+
+实际上，在一个`os.FileMode`类型的值（以下简称`FileMode`值）中，只有最低的9个比特位才用于表示文件的权限。当我们拿到一个此类型的值时，可以把它和`os.ModePerm`常量的值做按位与操作。
+
+**从高到低，这3组分别表示的是文件所有者（也就是创建这个文件的那个用户）、文件所有者所属的用户组，以及其他用户对该文件的访问权限。而对于每个组，其中的3个比特位从高到低分别表示读权限、写权限和执行权限。**
+
+==与linux文件权限管理一致==
+
+## 访问网络服务
+
+
+
+### 前导内容 socket 和IPC
+
+#### socket
+
+> socket是一种IPC方法。IPC 也为进程间通信，换句话说就是多个进程之间，相互通信的方法
+>
+> 这些方法主要包括; 系统信号signal，管道pipe，套接字socket  ，文件锁file lock，消息队列message queue ， 信号灯 semaphore 。
+>
+> 而包名 就是 os.signal  或者os.pipe 管道
+
+==众多IPC方法中，socket 是最为通用和灵活的一种==
+
+支持socket的操作系统一般都会对外提供一套API。**跑在它们之上的应用程序利用这套API，就可以与互联网上的另一台计算机中的程序、同一台计算机中的其他程序，甚至同一个程序中的其他线程进行通信。**
+
+> 所谓的系统调用，你可以理解为特殊的C语言函数。它们是连接应用程序和操作系统内核的桥梁，也是应用程序使用操作系统功能的唯一渠道。
+
+**今天的问题是：`net.Dial`函数的第一个参数`network`有哪些可选值？**
+
+这道题的**典型回答**是这样的。
+
+`net.Dial`函数会接受两个参数，分别名为`network`和`address`，都是`string`类型的。
+
+参数`network`常用的可选值一共有9个。这些值分别代表了程序底层创建的socket实例可使用的不同通信协议，罗列如下。
+
+- `"tcp"`：代表TCP协议，其基于的IP协议的版本根据参数`address`的值自适应。
+- `"tcp4"`：代表基于IP协议第四版的TCP协议。
+- `"tcp6"`：代表基于IP协议第六版的TCP协议。
+- `"udp"`：代表UDP协议，其基于的IP协议的版本根据参数`address`的值自适应。
+- `"udp4"`：代表基于IP协议第四版的UDP协议。
+- `"udp6"`：代表基于IP协议第六版的UDP协议。
+- `"unix"`：代表Unix通信域下的一种内部socket协议，以SOCK_STREAM为socket类型。
+- `"unixgram"`：代表Unix通信域下的一种内部socket协议，以SOCK_DGRAM为socket类型。
+- `"unixpacket"`：代表Unix通信域下的一种内部socket协议，以SOCK_SEQPACKET为socket类型。
+
+**Unix域**，指的是一种类Unix操作系统中特有的通信域。在装有此类操作系统的同一台计算机中，应用程序可以基于此域建立socket连接。
+
+以上三种通信域分别可以由`syscall`代码包中的常量`AF_INET`、`AF_INET6`和`AF_UNIX`表示。
+
+Socket的类型一共有4种，分别是：`SOCK_DGRAM`、`SOCK_STREAM`、`SOCK_SEQPACKET`以及`SOCK_RAW`。`syscall`代码包中也都有同名的常量与之对应。前两者更加常用一些。
+
+而`SOCK_STREAM`这个socket类型，恰恰与`SOCK_DGRAM`相反。**它没有消息边界，但有逻辑连接，能够保证传输的可靠性和数据的有序性，同时还可以实现数据的双向传输。**众所周知的基于TCP协议的网络通信就属于此类。
+
+> 这样的网络通信传输数据的形式是字节流，而不是数据报文。字节流是以字节为单位的。内核程序无法感知一段字节流中包含了多少个消息，以及这些消息是否完整，这完全需要应用程序自己去把控。
+>
+> 不过，此类网络通信中的一端，总是会忠实地按照另一端发送数据时的字节排列顺序，接收和缓存它们。所以，应用程序需要根据双方的约定去数据中查找消息边界，并按照边界切割数据，仅此而已。
+
+`syscall.Socket`函数的第三个参数用于表示socket实例所使用的协议。
+
+通常，只要明确指定了前两个参数的值，我们就无需再去确定第三个参数值了，一般把它置为`0`就可以了。这时，内核程序会自行选择最合适的协议。
+
+比如，当前两个参数值分别为`syscall.AF_INET`和`syscall.SOCK_DGRAM`的时候，内核程序会选择UDP作为协议。
+
+又比如，在前两个参数值分别为`syscall.AF_INET6`和`syscall.SOCK_STREAM`时，内核程序可能会选择TCP作为协议。
