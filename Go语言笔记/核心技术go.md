@@ -415,6 +415,211 @@ if err == nil {
 
 而产生死锁，程序必然崩溃
 
+
+
+
+
+## 原子操作atomic
+
+条件变量主要是用于协调想要访问共享资源的那些线程 
+
+真正能够保证原子性执行的只有原子操作。原子操作是不容许中断的。
+
+
+
+**更具体的说，正是因为原子操作不能被中断，所以他需要足够简单，并且要求快速**
+
+
+
+go语言中，提供的包为 sync/atomic 
+
+`sync/atomic`包中的函数可以做的原子操作有：加法（add）、比较并交换（compare and swap，简称CAS）、加载（load）、存储（store）和交换（swap）。
+
+因为原子操作函数需要的是被操作值的指针，而不是这个值本身；被传入函数的参数值都会被复制，像这种基本类型的值一旦被传入函数，就已经与函数外的那个值毫无关系了。
+
+value 新类型，，相当于一个容器，可以用来“原子地”存储和加载任意的值
+
+atomic.Value 类型是开箱即用的，我们声明一个该类型的变量之后就可以使用了，
+
+但是还是有类型判断的，首次存储的值，往后存储的值都必须是相同的类型，并且不能存储nil
+
+==尽量不要向原子值中存储引用类型的值。==
+
+
+
+
+
+## sync.WaitGroup 和sync.Once
+
+> 印子； 声明一个通道，使它的容量与我们手动启用的goroutine 的数量相同，之后再利用这个通道，让主goroutine 等待其他的goroutine 的运行结束
+>
+> 具体来书：让其他的goroutine在运行结束之前，都向这个通道发送一个元素值，并且，让主goroutine在最后从这个通道中接收元素值，接收的次数需要与其他的goroutine的数量相同
+
+```go
+func coordinateWithChan() {
+ sign := make(chan struct{}, 2)
+ num := int32(0)
+ fmt.Printf("The number: %d [with chan struct{}]\n", num)
+ max := int32(10)
+ go addNum(&num, 1, max, func() {
+  sign <- struct{}{}
+ })
+ go addNum(&num, 2, max, func() {
+  sign <- struct{}{}
+ })
+ <-sign
+ <-sign
+}
+```
+
+
+
+上述代码，看起来非常的丑陋，
+
+另外一个同步工具, 即 ： sync 包的waitGroup 类型。他比通道更加适合实现这种一对多的goroutine 协作流程
+
+这个是开箱急用的，也是并发安全的。同时一旦使用，就不能被复制了
+
+
+
+waitGroup 类型拥有三个指针方法 add ,done ,wait
+
+就相当于 有一个计数器，通过add 和done 来相加减
+
+> 例如 开启一个goroutine 就add 一个，一个运行完成就要done一次
+
+```go
+func coordinateWithWaitGroup() {
+ var wg sync.WaitGroup
+ wg.Add(2)
+ num := int32(0)
+ fmt.Printf("The number: %d [with sync.WaitGroup]\n", num)
+ max := int32(10)
+ go addNum(&num, 3, max, wg.Done)
+ go addNum(&num, 4, max, wg.Done)
+ wg.Wait()
+}
+```
+
+如果在一个此类值的`Wait`方法被执行期间，跨越了两个计数周期，**那么就会引发一个panic**
+
+例如，在当前的goroutine因调用此类值的`Wait`方法，而被阻塞的时候，另一个goroutine调用了该值的`Done`方法，并使其计数器的值变为了`0`
+
+
+
+总结： **不要把增加其计数器值的操作和调用其`Wait`方法的代码，放在不同的goroutine中执行。换句话说，要杜绝对同一个`WaitGroup`值的两种操作的并发执行。**
+
+
+
+#### sync.Once  的do方法是怎么保证只执行参数函数一次的
+
+once 类型 也是结构体类型，同样是开箱即用和并发安全的。并且里面包含sync.mutex类型的字段，所以复制该类型的值也会导致该功能失效
+
+
+
+
+
+do方法 只支持 func（），，即无参数声明和结果声明的函数。
+
+==该方法的功能不是对每一种参数方法函数都执行一次，而是只执行“首次被调用时传入的”的那个函数，并且之后不会在执行任何参==
+
+**可以看下GOF设计模式**
+
+
+
+
+
+##### do 方法在功能方面的两个特点
+
+1. **第一个特点**，由于`Do`方法只会在参数函数执行结束之后把`done`字段的值变为`1`，因此，如果参数函数的执行需要很长时间或者根本就不会结束（比如执行一些守护任务），那么就有可能会导致相关goroutine的同时阻塞。
+2. **第二个特点**，`Do`方法在参数函数执行结束后，对`done`字段的赋值用的是原子操作，并且，这一操作是被挂在`defer`语句中的。因此，不论参数函数的执行会以怎样的方式结束，`done`字段的值都会变为`1`
+
+
+
+
+
+
+
+总结， 使用waitGroup ：
+
+**我们最好用“先统一`Add`，再并发`Done`，最后`Wait`”这种标准方式，来使用`WaitGroup`值**
+
+
+
+`WaitGroup`值是可以被复用的，但需要保证其计数周期的完整性。尤其是涉及对其`Wait`方法调用的时候，它的下一个计数周期必须要等到，与当前计数周期对应的那个`Wait`方法调用完成之后，才能够开始。
+
+```go
+func coordinateWithWaitGroup() {
+ total := 12
+ stride := 3
+ var num int32
+ fmt.Printf("The number: %d [with sync.WaitGroup]\n", num)
+ var wg sync.WaitGroup
+ for i := 1; i <= total; i = i + stride {
+  wg.Add(stride)
+  for j := 0; j < stride; j++ {
+   go addNum(&num, i+j, wg.Done)
+  }
+  wg.Wait()
+ }
+ fmt.Println("End.")
+}
+```
+
+
+
+## context.Context 类型
+
+> 怎么使用context包中的程序实体，实现一对多的goroutine协作流程
+>
+> 使用context 包模仿上面coordinateWithWaitGroup 函数相同的功能
+
+```go
+func coordinateWithContext() {
+ total := 12
+ var num int32
+ fmt.Printf("The number: %d [with context.Context]\n", num)
+ cxt, cancelFunc := context.WithCancel(context.Background())
+ for i := 1; i <= total; i++ {
+  go addNum(&num, i, func() {
+   if atomic.LoadInt32(&num) == int32(total) {
+    cancelFunc()
+   }
+  })
+ }
+ <-cxt.Done()
+ fmt.Println("End.")
+}
+```
+
+更具体地说，`Context`类型可以提供一类代表上下文的值。此类值是并发安全的，也就是说它可以被传播给多个goroutine。
+
+
+
+## 临时对象池sync.pool
+
+go 语言 特有的几个同步工具：
+
+1. sync/atomic.Value
+2. sync.Once
+3. sync.WaiteGroup
+4. context.context
+5. sync.Pool
+
+
+
+`sync.Pool`类型可以被称为临时对象池，它的值可以被用来存储临时的对象。与Go语言的很多同步工具一样，`sync.Pool`类型也属于结构体类型，它的值在被真正使用之后，就不应该再被复制了。
+
+
+
+临时对象的意思 ： 不需要持久使用的某一类值，这类值对于程序来说可有可无，但如果有的话会明显更好。他们的创建和销毁可以在任何时候发生，并发完全不会影响到程序的功能。
+
+同时，它们也应该是无需被区分的，其中的任何一个值都可以代替另一个。如果你的某类值完全满足上述条件，那么你就可以把它们存储到临时对象池中。
+
+sync.Pool 类型只有两个方法——put和get .Put用于在当前的池中存放临时对象，它接受一个interface{} 类型的参数，而Get则被用于从当前的池中获取临时对象，它会返回一个interface{}类型的值
+
+
+
 ## sync.cond
 
 条件变量怎么样与互斥锁配合使用
