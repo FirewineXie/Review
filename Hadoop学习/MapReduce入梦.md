@@ -688,7 +688,7 @@
 
    
 
-#### job 提交流程源码和切片源码详解
+####  job 提交流程源码和切片源码详解
 
 1. job提交流程源码详解
 
@@ -744,3 +744,1274 @@ status = submitClient.submitJob(jobId, submitJobDir.toString(), job.getCredentia
 
 ![image-20201102223827501](img/image-20201102223827501.png)
 
+####  CombineTextInoutFormat 切片机制
+
+> 框架默认的TextInputFormat 切片机制是对任务按文件规划切片，==不管文件多小，都会是以一个单独的切片== 都会交给一个MapTask。这样如果有大量小文件，就会产生大量的MapTask，处理效率极其低下。
+
+1. 应用场景 
+
+   CombineTextInputFormat 用于小文件过多的场景，它可以将多个小文件从逻辑上规划到一个切片中，这样，多个小文件就可以交给一个MapTask处理
+
+2. 虚拟存储切片最大值设置
+
+   CombineTextInputFormat.SetmaxInputSplitSize(job,4194304);// 4m
+
+   **虚拟存储切片最大值设置最好根据实际的小文件大小情况来设置具体的值**
+
+3. CombineTextInputForamt 切片机制
+
+   ![image-20201107145750519](img/image-20201107145750519.png)
+
+   - 虚拟存储过程
+
+     将输入目录下所有文件大小，依次和设置的setMaxInputSplitSize值比较，如果不大于设置的最大值，逻辑上划分一个块。如果输入文件大于设置的最大值且大于两倍，那么以最大值切割一块；当剩余数据大小超过设置的最大值且不大于最大值2倍，此时将文件均分成2个虚拟存储块（防止出现太小切片）。
+
+#### CombineTextInputFormat案例实操
+
+- 将输入的大量小文件合并成一个切片统一处理
+
+- 在wordcount 的wordDriver 中增加如下代码，运行程序，观察运行的切片格式为3 
+
+  - inputForamt
+
+    ```java
+    // 如果不设置InputFormat，它默认用的是TextInputFormat.class
+    job.setInputFormatClass(CombineTextInputFormat.class);
+    
+    //虚拟存储切片最大值设置4m
+    CombineTextInputFormat.setMaxInputSplitSize(job, 4194304);
+    
+    ```
+
+    运行结果3个切片
+
+  - 修改代码
+
+    ```java
+    // 如果不设置InputFormat，它默认用的是TextInputFormat.class
+    job.setInputFormatClass(CombineTextInputFormat.class);
+    
+    //虚拟存储切片最大值设置20m
+    CombineTextInputFormat.setMaxInputSplitSize(job, 20971520)
+    
+    ```
+
+    运行结果为1个切片
+
+#### FileInputForamt 实现类 
+
+> 前情提要 ： 针对不同的数据类型，mapreduce 是如何读取这些数据的呢
+
+> 常见的接口实现类包括： TextInputForamt 、 keyValueTextInputFormat  、 NineInputFormat 、 CombineTextInputForamt 和自定义 InputForamt 等
+
+##### TextInputForamt
+
+> 是默认的FileInputFormat 实现类，按行读取每条记录，==键是存储改行在整个文件中的起始字节偏移量，LongWitable类型，值是这行的内容，不包括任何终止符（换行符或回车符），Text类型 
+
+##### keyValueTextInputForamt
+
+> 每一行均为一条记录，被分隔符分割为key，value。可以通过在驱动类中设置==conf.set(keyVlaueLineRecordReader.KEY_VALUE_SEPERATOR,"\t")== 来设定分隔符。默认分隔符是tab。
+
+```txt
+line1 ——>  ricd  learning form
+```
+
+代码：
+
+- mapper
+
+  ```java
+  package com.example.mr.kv;
+  
+  import org.apache.hadoop.io.IntWritable;
+  import org.apache.hadoop.io.LongWritable;
+  import org.apache.hadoop.io.Text;
+  import org.apache.hadoop.mapreduce.Mapper;
+  
+  import java.io.IOException;
+  
+  /**
+   * Created by IntelliJ IDEA.
+   *
+   * @author Firewine
+   * @version 1.0 @ProgramName: KvTextMapper @Create 2020/11/7 @Description: bangzhang ni hao
+   *     <bangzhang ,1
+   */
+  public class KvTextMapper extends Mapper<Text, Text, Text, LongWritable> {
+  
+      /**
+       * 设置value
+       */
+      LongWritable v = new LongWritable(1);
+  
+      @Override
+      protected void map(Text key, Text value, Context context) throws IOException, InterruptedException {
+  
+      //    1. 封装对象
+      //    2. 写出
+          context.write(key,v);
+      }
+  }
+  
+  ```
+
+- reducer
+
+  ```java
+  package com.example.mr.kv;
+  
+  import org.apache.hadoop.io.IntWritable;
+  import org.apache.hadoop.io.Text;
+  import org.apache.hadoop.mapreduce.Reducer;
+  
+  import java.io.IOException;
+  
+  /**
+   * Created by IntelliJ IDEA.
+   *
+   * @author Firewine
+   * @version 1.0 @ProgramName: KvTextReducer @Create 2020/11/7 @Description:
+   */
+  public class KvTextReducer extends Reducer<Text, IntWritable, Text, IntWritable> {
+    IntWritable v = new IntWritable();
+  
+    @Override
+    protected void reduce(Text key, Iterable<IntWritable> values, Context context)
+        throws IOException, InterruptedException {
+  
+      //    1. 累加求和
+      int sum = 0;
+      for (IntWritable value : values) {
+        sum += value.get();
+      }
+      v.set(sum);
+  
+      //    2. 写出
+      context.write(key, v);
+    }
+  }
+  
+  ```
+
+- driver
+
+  ```java
+  package com.example.mr.kv;
+  
+  import org.apache.hadoop.conf.Configuration;
+  import org.apache.hadoop.fs.Path;
+  import org.apache.hadoop.io.IntWritable;
+  import org.apache.hadoop.io.Text;
+  
+  import org.apache.hadoop.mapreduce.Job;
+  import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+  import org.apache.hadoop.mapreduce.lib.input.KeyValueLineRecordReader;
+  import org.apache.hadoop.mapreduce.lib.input.KeyValueTextInputFormat;
+  import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+  
+  import java.io.IOException;
+  
+  /**
+   * Created by IntelliJ IDEA.
+   *
+   * @author Firewine
+   * @version 1.0 @ProgramName: KvTextDriver @Create 2020/11/7 @Description:
+   */
+  public class KvTextDriver {
+  
+    public static void main(String[] args)
+        throws IOException, ClassNotFoundException, InterruptedException {
+  
+      args = new String[]{"demo",""};
+      Configuration conf = new Configuration();
+      conf.set(KeyValueLineRecordReader.KEY_VALUE_SEPARATOR, "  ");
+  
+      // 1. 获取job 对象
+      Job job = Job.getInstance(conf);
+      //  2. 设置jar 存储路径
+      job.setJarByClass(KvTextDriver.class);
+      //  3. 管理mapper 和reduce 类
+      job.setMapperClass(KvTextMapper.class);
+      job.setReducerClass(KvTextReducer.class);
+      //  4. 设置mapper 输出的key和value 类型
+      job.setMapOutputKeyClass(Text.class);
+      job.setMapOutputValueClass(IntWritable.class);
+      //  5. 设置最终输出的key 和value
+      job.setOutputKeyClass(Text.class);
+      job.setOutputValueClass(IntWritable.class);
+  
+      job.setInputFormatClass(KeyValueTextInputFormat.class);
+      //  6. 设置输入输出路径
+      FileInputFormat.setInputPaths(job, new Path(args[0]));
+      FileOutputFormat.setOutputPath(job, new Path(args[1]));
+      //  7. 提交job
+      boolean result = job.waitForCompletion(true);
+      System.exit(result? 0 : 1);
+    }
+  }
+  
+  ```
+
+  
+
+##### NLineInputFormat
+
+> 代表每个map 进程处理的InputSplit 不再按Block块去划分，而是按照NlineInputForamt指定的行数N来划分。即输入文件的总行数/N = 切片数， 如果不整除，切片数 = 商 + 1
+
+![image-20201107183653678](img/image-20201107183653678.png)
+
+- 使用案例 
+
+- mapper
+
+  ```java
+  package com.example.mr.nline;
+  
+  import org.apache.hadoop.io.IntWritable;
+  import org.apache.hadoop.io.LongWritable;
+  import org.apache.hadoop.io.Text;
+  import org.apache.hadoop.mapreduce.Mapper;
+  
+  import java.io.IOException;
+  
+  /**
+   * Created by IntelliJ IDEA.
+   *
+   * @author Firewine
+   * @version 1.0 @ProgramName: NlineMapper @Create 2020/11/7 @Description:
+   */
+  public class NlineMapper extends Mapper<LongWritable, Text, Text, IntWritable> {
+  
+    Text k = new Text();
+    IntWritable v = new IntWritable();
+  
+    @Override
+    protected void map(LongWritable key, Text value, Context context)
+        throws IOException, InterruptedException {
+  
+      //    1. 获取一行
+      String line = value.toString();
+  
+      //    切割
+      String[] words = line.split(" ");
+      //    循环写出
+      for (String word : words) {
+        k.set(word);
+  
+        context.write(k, v);
+      }
+    }
+  }
+  
+  ```
+
+- reducer
+
+  ```java
+  package com.example.mr.kv;
+  
+  import org.apache.hadoop.io.IntWritable;
+  import org.apache.hadoop.io.Text;
+  import org.apache.hadoop.mapreduce.Reducer;
+  
+  import java.io.IOException;
+  
+  /**
+   * Created by IntelliJ IDEA.
+   *
+   * @author Firewine
+   * @version 1.0 @ProgramName: KvTextReducer @Create 2020/11/7 @Description:
+   */
+  public class KvTextReducer extends Reducer<Text, IntWritable, Text, IntWritable> {
+    IntWritable v = new IntWritable();
+  
+    @Override
+    protected void reduce(Text key, Iterable<IntWritable> values, Context context)
+        throws IOException, InterruptedException {
+  
+      //    1. 累加求和
+      int sum = 0;
+      for (IntWritable value : values) {
+        sum += value.get();
+      }
+      v.set(sum);
+  
+      //    2. 写出
+      context.write(key, v);
+    }
+  }
+  
+  ```
+
+- driver
+
+  ```java
+  package com.example.mr.nline;
+  
+  import com.example.mr.kv.KvTextDriver;
+  import com.example.mr.kv.KvTextMapper;
+  import com.example.mr.kv.KvTextReducer;
+  import org.apache.hadoop.conf.Configuration;
+  import org.apache.hadoop.fs.Path;
+  import org.apache.hadoop.io.IntWritable;
+  import org.apache.hadoop.io.Text;
+  import org.apache.hadoop.mapreduce.Job;
+  import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+  import org.apache.hadoop.mapreduce.lib.input.KeyValueLineRecordReader;
+  import org.apache.hadoop.mapreduce.lib.input.KeyValueTextInputFormat;
+  import org.apache.hadoop.mapreduce.lib.input.NLineInputFormat;
+  import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+  
+  import java.io.IOException;
+  
+  /**
+   * Created by IntelliJ IDEA.
+   *
+   * @author Firewine
+   * @version 1.0
+   * @ProgramName: NlineDriver
+   * @Create 2020/11/7
+   * @Description:
+   */
+  public class NlineDriver {
+  
+      public static void main(String[] args)
+              throws IOException, ClassNotFoundException, InterruptedException {
+  
+          args = new String[]{"demo",""};
+          Configuration conf = new Configuration();
+  
+          // 1. 获取job 对象
+          Job job = Job.getInstance(conf);
+  
+          NLineInputFormat.setNumLinesPerSplit(job,3);
+          job.setInputFormatClass(NLineInputFormat.class);
+          //  2. 设置jar 存储路径
+          job.setJarByClass(NlineDriver.class);
+          //  3. 管理mapper 和reduce 类
+          job.setMapperClass(NlineMapper.class);
+          job.setReducerClass(NlineReducer.class);
+          //  4. 设置mapper 输出的key和value 类型
+          job.setMapOutputKeyClass(Text.class);
+          job.setMapOutputValueClass(IntWritable.class);
+          //  5. 设置最终输出的key 和value
+          job.setOutputKeyClass(Text.class);
+          job.setOutputValueClass(IntWritable.class);
+  
+          //  6. 设置输入输出路径
+          FileInputFormat.setInputPaths(job, new Path(args[0]));
+          FileOutputFormat.setOutputPath(job, new Path(args[1]));
+          //  7. 提交job
+          boolean result = job.waitForCompletion(true);
+          System.exit(result? 0 : 1);
+      }
+  }
+  
+  ```
+
+  
+
+##### 自定义Inputformat
+
+> 自定义Inputformat 步骤如下： 
+>
+> 1. 自定义一个类继承FileInputForamt
+> 2. 改写RecordReader，实现一次读取一个完整文件封装为KV
+> 3. 在输出时使用SequenceFileOutPutForamt输出合并文件
+
+案例实操：
+
+1. 需求
+
+   将多个小文件合并成一个SequenceFile文件（SequenceFile文件是Hadoop用来存储二进制形式的key-value对的文件格式），SequenceFile里面存储着多个文件，存储的形式为文件路径+名称为key，文件内容为value。
+
+2. 需求分析
+
+   > 1. 自定义一个类继承FileInputFormat
+   >
+   >    1. 重写isSplitable方法，返回false 不可切割
+   >    2. 重写createRecordReader ，创建自定义的RecordReade对象，并初始化
+   >
+   > 2. 改写RecordReader,实现一次读取一个完整文件封装KV
+   >
+   >    1. 采用IO流一次读取一个文件输出到value中，因为设置了不可切片，最终把所有文件都封装到了value中
+   >    2. 获取文件路径信息+名称，并设置key
+   >
+   > 3. 设置Driver
+   >
+   >    1. 设置输入的Inputforamt
+   >
+   >       job.setInputFormatClass(WholeFileInputFormat.class)
+   >
+   >    2. 设置输出的outputFormat
+   >
+   >       job.setOutPutFormatClass(SequenceFileOutPutFormat.class)
+
+3. 代码
+
+   - driver
+
+     ```java
+     package com.example.mr.inputformat;
+     
+     import com.example.mr.kv.KvTextDriver;
+     import com.example.mr.kv.KvTextMapper;
+     import com.example.mr.kv.KvTextReducer;
+     import org.apache.hadoop.conf.Configuration;
+     import org.apache.hadoop.fs.Path;
+     import org.apache.hadoop.io.BytesWritable;
+     import org.apache.hadoop.io.IntWritable;
+     import org.apache.hadoop.io.Text;
+     import org.apache.hadoop.mapreduce.Job;
+     import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+     import org.apache.hadoop.mapreduce.lib.input.KeyValueLineRecordReader;
+     import org.apache.hadoop.mapreduce.lib.input.KeyValueTextInputFormat;
+     import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+     
+     import java.io.IOException;
+     
+     /**
+      * Created by IntelliJ IDEA.
+      *
+      * @author Firewine
+      * @version 1.0
+      * @ProgramName: SequenceFileDriver
+      * @Create 2020/11/8
+      * @Description:
+      */
+     public class SequenceFileDriver {
+     
+       public static void main(String[] args) throws IOException, ClassNotFoundException, InterruptedException {
+           // 输入输出路径需要根据自己电脑上实际的输入输出路径设置
+           args = new String[] { "e:/input/inputinputformat", "e:/output1" };
+     
+           // 1 获取job对象
+           Configuration conf = new Configuration();
+           Job job = Job.getInstance(conf);
+     
+           // 2 设置jar包存储位置、关联自定义的mapper和reducer
+           job.setJarByClass(SequenceFileDriver.class);
+           job.setMapperClass(SequenceFileMapper.class);
+           job.setReducerClass(SequenceFileReducer.class);
+     
+           // 7设置输入的inputFormat
+           // job.setInputFormatClass(WholeFileInputformat.class);
+     
+           // 8设置输出的outputFormat
+           // job.setOutputFormatClass(SequenceFileOutputFormat.class);
+     
+     // 3 设置map输出端的kv类型
+           job.setMapOutputKeyClass(Text.class);
+           job.setMapOutputValueClass(BytesWritable.class);
+     
+           // 4 设置最终输出端的kv类型
+           job.setOutputKeyClass(Text.class);
+           job.setOutputValueClass(BytesWritable.class);
+     
+           // 5 设置输入输出路径
+           FileInputFormat.setInputPaths(job, new Path(args[0]));
+           FileOutputFormat.setOutputPath(job, new Path(args[1]));
+     
+           // 6 提交job
+           boolean result = job.waitForCompletion(true);
+           System.exit(result ? 0 : 1);
+       }
+     
+     
+     }
+     
+     ```
+
+   - mapper
+
+     ```java
+     package com.example.mr.inputformat;
+     
+     import org.apache.hadoop.io.ByteWritable;
+     import org.apache.hadoop.io.Text;
+     import org.apache.hadoop.mapreduce.Mapper;
+     
+     import java.io.IOException;
+     
+     /**
+      * Created by IntelliJ IDEA.
+      *
+      * @author Firewine
+      * @version 1.0 @ProgramName: SequenceFileMapper @Create 2020/11/8 @Description:
+      */
+     public class SequenceFileMapper extends Mapper<Text, ByteWritable, Text, ByteWritable> {
+     
+     
+         @Override
+         protected void map(Text key, ByteWritable value, Context context) throws IOException, InterruptedException {
+     
+             context.write(key,value);
+         }
+     }
+     
+     
+     ```
+
+   - reducer
+
+     ```java
+     package com.example.mr.inputformat;
+     
+     import org.apache.hadoop.io.ByteWritable;
+     import org.apache.hadoop.io.BytesWritable;
+     import org.apache.hadoop.io.Text;
+     import org.apache.hadoop.mapreduce.Reducer;
+     
+     import java.io.IOException;
+     
+     /**
+      * Created by IntelliJ IDEA.
+      *
+      * @author Firewine
+      * @version 1.0
+      * @ProgramName: SequenceFileReducer
+      * @Create 2020/11/8
+      * @Description:
+      */
+     public class SequenceFileReducer extends Reducer<Text, ByteWritable, Text, ByteWritable> {
+     
+         @Override
+         protected void reduce(Text key, Iterable<ByteWritable> values, Context context) throws IOException, InterruptedException {
+     
+         //    循环写出
+             for (ByteWritable value : values){
+                context.write(key,value);
+             }
+         }
+     }
+     
+     
+     ```
+
+   - inputForamt
+
+     ```java
+     package com.example.mr.inputformat;
+     
+     import org.apache.hadoop.io.ByteWritable;
+     import org.apache.hadoop.io.BytesWritable;
+     import org.apache.hadoop.io.Text;
+     import org.apache.hadoop.mapreduce.Reducer;
+     
+     import java.io.IOException;
+     
+     /**
+      * Created by IntelliJ IDEA.
+      *
+      * @author Firewine
+      * @version 1.0
+      * @ProgramName: SequenceFileReducer
+      * @Create 2020/11/8
+      * @Description:
+      */
+     public class SequenceFileReducer extends Reducer<Text, ByteWritable, Text, ByteWritable> {
+     
+         @Override
+         protected void reduce(Text key, Iterable<ByteWritable> values, Context context) throws IOException, InterruptedException {
+     
+         //    循环写出
+             for (ByteWritable value : values){
+                context.write(key,value);
+             }
+         }
+     }
+     
+     
+     ```
+
+   - recordReader
+
+     ```java
+     package com.example.mr.inputformat;
+     
+     import org.apache.hadoop.conf.Configuration;
+     import org.apache.hadoop.fs.FSDataInputStream;
+     import org.apache.hadoop.fs.FileSystem;
+     import org.apache.hadoop.fs.Path;
+     import org.apache.hadoop.io.BytesWritable;
+     import org.apache.hadoop.io.IOUtils;
+     import org.apache.hadoop.io.Text;
+     import org.apache.hadoop.mapred.FileSplit;
+     import org.apache.hadoop.mapreduce.InputSplit;
+     import org.apache.hadoop.mapreduce.RecordReader;
+     import org.apache.hadoop.mapreduce.TaskAttemptContext;
+     
+     import java.io.IOException;
+     
+     /**
+      * Created by IntelliJ IDEA.
+      *
+      * @author Firewine
+      * @version 1.0 @ProgramName: WholeRecordReader @Create 2020/11/8 @Description:
+      */
+     public class WholeRecordReader extends RecordReader<Text, BytesWritable> {
+       FileSplit split;
+       Configuration configuration;
+       Text k = new Text();
+       BytesWritable v = new BytesWritable();
+      boolean isProgress = true;
+       @Override
+       public void initialize(InputSplit inputSplit, TaskAttemptContext taskAttemptContext)
+           throws IOException, InterruptedException {
+     
+         //    初始化
+         this.split = (FileSplit) inputSplit;
+         configuration = taskAttemptContext.getConfiguration();
+       }
+     
+       @Override
+       public boolean nextKeyValue() throws IOException, InterruptedException {
+     
+         if (isProgress){
+           // 核心业务逻辑
+           byte[] buf = new byte[(int) split.getLength()];
+           // 1. 获取fs对象
+           Path path = split.getPath();
+           FileSystem fs = path.getFileSystem(configuration);
+     
+           // 2. 获取输入流
+           FSDataInputStream fis = fs.open(path);
+           // 3. 拷贝
+           IOUtils.readFully(fis, buf, 0, buf.length);
+     
+           // 4. 封装v
+           v.set(buf,0,buf.length);
+     
+           // 5. 封装k
+           k.set(path.toString());
+     
+           // 6  关闭资源
+           IOUtils.closeStream(fis);
+     
+           isProgress = false;
+           return true;
+         }
+         return false;
+     
+     
+       }
+     
+       @Override
+       public Text getCurrentKey() throws IOException, InterruptedException {
+     
+         return k;
+       }
+     
+       @Override
+       public BytesWritable getCurrentValue() throws IOException, InterruptedException {
+     
+         return v;
+       }
+     
+       @Override
+       public float getProgress() throws IOException, InterruptedException {
+         return 0;
+       }
+     
+       @Override
+       public void close() throws IOException {}
+     }
+     
+     ```
+
+     
+
+
+
+
+
+### 3.2 mapreduce 工作流程
+
+####  工作流程一
+
+![image-20201108145548696](img/image-20201108145548696.png)
+
+实现字典排序的手段是快排
+
+#### 工作流程二
+
+![image-20201108145634193](img/image-20201108145634193.png)
+
+### 3.3 shuffle 机制
+
+> Map方法之后，Reduce方法之前的数据处理过程称为shuffle
+
+![image-20201108153713560](img/image-20201108153713560.png)
+
+#### Partition 分区
+
+#####  默认分区
+
+默认分区是hash分区
+
+```java 
+public class HashPartitioner<K,V> extends Partitioner<L,V> {
+
+public int getPartition(K key,V value, int numReduceTasks) {
+    return (key,hashCode() & Integer.MAX_VALUE ) % nuReduceTasks
+}
+```
+
+默认分区是根据key 的hashCode 对ReduceTasks 个数取模得到的。用户没法控制那个key 存储到那个分区
+
+##### 自定义分区
+
+![image-20201108182029762](img/image-20201108182029762.png)
+
+![image-20201108195823266](img/image-20201108195823266.png)
+
+#### WritableComparable排序
+
+> 排序是MapReduce 框架中最终要的操作之一。
+>
+> MatTask 和ReduceTask 均会对数据==按照key== 进行排序。该操作属于hadoop 的默认行为。==任何应用程序中的数据均会被排序，而不管逻辑上是否需要==
+>
+> 默认排序是按照字典顺序排序，且实现该偏序方法是快速排序
+
+- 对于mapper 阶段
+
+  > 对于MapTask ，它会将处理的结果暂时放到环形缓冲区汇总，当环形缓冲区使用率达到一定阈值后，在对缓冲区中的数据进行一次快速排序，并将这些有序数据溢写到磁盘上，而当数据处理完毕后，它会对磁盘上所有文件进行归并排序
+
+- reducer 阶段
+
+  > 它从每个MapTask 上远程拷贝相应的数据文件，如果文件大小超过一定阈值，则溢写到磁盘上，否则存储在内存中。如果磁盘上文件数目达到一定阈值，则进行一次归并排序以生成一个更大的文件； 如果内存中文件大小或者数目超过一定阈值，则进行一次合并后将数据溢写到磁盘上。当所有数据拷贝完毕后。ReduceTask统一对内存和磁盘上的所有数据进行一次归并排序。
+
+##### 排序的分类
+
+1. 部分排序
+
+   MapReduce 根据输入记录的键对数据集排序。保证输出的每个文件内部有序
+
+2. 全排序
+
+   最终输出结果只有一个文件，且文件内部有序。实现方式是只设置一个reduceTask。但该方法在处理大型文件时效率极低，因为一台机器处理所有文件，完全丧失了MapReduce 所提供的并行架构。
+
+3. 辅助排序
+
+   在Reduce端对key进行分组，应用于： 在接收到的key为bean对象时，想让一个或者几个字段相同（全部字段比较不相同）的key进入到同一个reduce方法时，可以采用分组排序。
+
+4. 二次排序
+
+   在自定义排序过程中，如果comparTo中判断条件为两个即为二次排序
+
+##### 自定义排序WritableComparable
+
+原理分析
+
+bean对象做为key传输，需要实现WritableComparable接口重写compareTo方法，就可以实现排序。
+
+```java
+@Override
+
+public int compareTo(FlowBean o) {
+  int result;
+  // 按照总流量大小，倒序排列
+
+  if (sumFlow > bean.getSumFlow()) {
+   result = -1;
+  }else if (sumFlow < bean.getSumFlow()) {
+    result = 1;
+  }else {
+    result = 0;
+  }
+  return result;
+
+}
+```
+
+##### 案例（全排序）
+
+bean
+
+```java
+package com.example.mr.sort;
+
+import org.apache.hadoop.io.WritableComparable;
+
+import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.IOException;
+
+/**
+ * Created by IntelliJ IDEA.
+ *
+ * @author Firewine
+ * @version 1.0 @ProgramName: FlowBean @Create 2020/11/8 @Description:
+ */
+public class FlowBean implements WritableComparable<FlowBean> {
+
+  /** 上行流量 */
+  private long upFlow;
+  /** 下行流量 */
+  private long downFlow;
+  /** 总流量 */
+  private long sumFlow;
+
+  public FlowBean() {
+    super();
+  }
+
+  public FlowBean(long upFlow, long downFlow) {
+    this.upFlow = upFlow;
+    this.downFlow = downFlow;
+    sumFlow = upFlow + downFlow;
+  }
+
+  @Override
+  public String toString() {
+    return "FlowBean{"
+        + "upFlow="
+        + upFlow
+        + ", downFlow="
+        + downFlow
+        + ", sumFlow="
+        + sumFlow
+        + '}';
+  }
+
+  /**
+   * 比较
+   *
+   * @param bean
+   * @return
+   */
+  @Override
+  public int compareTo(FlowBean bean) {
+    int result;
+    // 核心比较判断
+    if (sumFlow > bean.getSumFlow()){
+      result = -1;
+    }else if (sumFlow < bean.getSumFlow()){
+      result = 1;
+    }else {
+      result = 0;
+    }
+    return result;
+  }
+
+  /**
+   * 序列化
+   *
+   * @param dataOutput
+   * @throws IOException
+   */
+  @Override
+  public void write(DataOutput dataOutput) throws IOException {
+    dataOutput.writeLong(upFlow);
+    dataOutput.writeLong(downFlow);
+    dataOutput.writeLong(sumFlow);
+  }
+
+  /**
+   * 反序列化
+   *
+   * @param dataInput
+   * @throws IOException
+   */
+  @Override
+  public void readFields(DataInput dataInput) throws IOException {
+    upFlow = dataInput.readLong();
+    downFlow = dataInput.readLong();
+    sumFlow = dataInput.readLong();
+  }
+
+
+  public long getUpFlow() {
+    return upFlow;
+  }
+
+  public void setUpFlow(long upFlow) {
+    this.upFlow = upFlow;
+  }
+
+  public long getDownFlow() {
+    return downFlow;
+  }
+
+  public void setDownFlow(long downFlow) {
+    this.downFlow = downFlow;
+  }
+
+  public long getSumFlow() {
+    return sumFlow;
+  }
+
+  public void setSumFlow(long sumFlow) {
+    this.sumFlow = sumFlow;
+  }
+}
+
+```
+
+mapper
+
+```java
+package com.example.mr.sort;
+
+import org.apache.hadoop.io.LongWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Mapper;
+
+import java.io.IOException;
+
+/**
+ * Created by IntelliJ IDEA.
+ *
+ * @author Firewine
+ * @version 1.0 @ProgramName: FlowCountSortMapper @Create 2020/11/8 @Description:
+ */
+public class FlowCountSortMapper extends Mapper<LongWritable, Text, FlowBean, Text> {
+  FlowBean k = new FlowBean();
+  Text v = new Text();
+
+  @Override
+  protected void map(LongWritable key, Text value, Context context)
+      throws IOException, InterruptedException {
+    //    phone   2481   24681  27162
+    //    1. 获取一行
+    String line = value.toString();
+    //    2. 切割
+    String[] fields = line.split("\t");
+
+    //    3. 封装对象
+    String phoneNum = fields[0];
+    long upFlow = Long.parseLong(fields[1]);
+    long downFlow = Long.parseLong(fields[2]);
+    long sumFlow = Long.parseLong(fields[3]);
+
+    k.setDownFlow(downFlow);
+    k.setSumFlow(sumFlow);
+    k.setUpFlow(upFlow);
+
+    v.set(phoneNum);
+
+  //  写出
+    context.write(k,v);
+  }
+}
+
+```
+
+reducer
+
+```java
+package com.example.mr.sort;
+
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Reducer;
+
+import java.io.IOException;
+
+/**
+ * Created by IntelliJ IDEA.
+ *
+ * @author Firewine
+ * @version 1.0
+ * @ProgramName: FlowCountSortReducer
+ * @Create 2020/11/8
+ * @Description:
+ */
+public class FlowCountSortReducer extends Reducer<FlowBean, Text, Text, FlowBean> {
+
+    @Override
+    protected void reduce(FlowBean key, Iterable<Text> values, Context context) throws IOException, InterruptedException, IOException {
+
+        // 循环输出，避免总流量相同情况
+        for (Text text : values) {
+            context.write(text, key);
+        }
+    }
+
+}
+
+```
+
+driver
+
+```java
+package com.example.mr.sort;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+
+import java.io.IOException;
+
+
+/**
+ * Created by IntelliJ IDEA.
+ *
+ * @author Firewine
+ * @version 1.0
+ * @ProgramName: FlowCountSortDriver
+ * @Create 2020/11/8
+ * @Description:
+ */
+public class FlowCountSortDriver {
+
+  public static void main(String[] args) throws IOException, ClassNotFoundException, InterruptedException {
+      // 输入输出路径需要根据自己电脑上实际的输入输出路径设置
+      args = new String[]{"e:/output1","e:/output2"};
+
+      // 1 获取配置信息，或者job对象实例
+      Configuration configuration = new Configuration();
+      Job job = Job.getInstance(configuration);
+
+      // 2 指定本程序的jar包所在的本地路径
+      job.setJarByClass(FlowCountSortDriver.class);
+
+      // 3 指定本业务job要使用的mapper/Reducer业务类
+      job.setMapperClass(FlowCountSortMapper.class);
+      job.setReducerClass(FlowCountSortReducer.class);
+
+      // 4 指定mapper输出数据的kv类型
+      job.setMapOutputKeyClass(FlowBean.class);
+      job.setMapOutputValueClass(Text.class);
+
+      // 5 指定最终输出的数据的kv类型
+      job.setOutputKeyClass(Text.class);
+      job.setOutputValueClass(FlowBean.class);
+
+      // 6 指定job的输入原始文件所在目录
+      FileInputFormat.setInputPaths(job, new Path(args[0]));
+      FileOutputFormat.setOutputPath(job, new Path(args[1]));
+
+      // 7 将job中配置的相关参数，以及job所用的java类所在的jar包， 提交给yarn去运行
+      boolean result = job.waitForCompletion(true);
+      System.exit(result ? 0 : 1);
+  }
+
+}
+
+
+```
+
+##### 案例 （区内排序）
+
+在sort 基础上增加
+
+provincePartitioner
+
+```java
+package com.example.mr.sort;
+
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Partitioner;
+
+/**
+ * Created by IntelliJ IDEA.
+ *
+ * @author Firewine
+ * @version 1.0
+ * @ProgramName: ProvincePartitioner
+ * @Create 2020/11/9
+ * @Description:
+ */
+public class ProvincePartitioner extends Partitioner<FlowBean, Text> {
+    @Override
+    public int getPartition(FlowBean flowBean, Text text, int i) {
+
+        // 按照手机号的前三位分区
+        String prePhoneNum = text.toString().substring(0,3);
+
+        int partition = 4;
+
+        if ("136".equals(prePhoneNum)){
+            partition = 0;
+        }else if ("137".equals(prePhoneNum)){
+            partition = 1;
+        }else if("138".equals(prePhoneNum)){
+            partition = 2;
+        }else if ("139".equals(prePhoneNum)){
+            partition = 3;
+        }
+
+        return partition;
+    }
+}
+
+```
+
+driver 驱动增加
+
+```java
+package com.example.mr.sort;
+
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
+import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+
+import java.io.IOException;
+
+
+/**
+ * Created by IntelliJ IDEA.
+ *
+ * @author Firewine
+ * @version 1.0
+ * @ProgramName: FlowCountSortDriver
+ * @Create 2020/11/8
+ * @Description:
+ */
+public class FlowCountSortDriver {
+
+  public static void main(String[] args) throws IOException, ClassNotFoundException, InterruptedException {
+      // 输入输出路径需要根据自己电脑上实际的输入输出路径设置
+      args = new String[]{"e:/output1","e:/output2"};
+
+      // 1 获取配置信息，或者job对象实例
+      Configuration configuration = new Configuration();
+      Job job = Job.getInstance(configuration);
+
+      // 2 指定本程序的jar包所在的本地路径
+      job.setJarByClass(FlowCountSortDriver.class);
+
+      // 3 指定本业务job要使用的mapper/Reducer业务类
+      job.setMapperClass(FlowCountSortMapper.class);
+      job.setReducerClass(FlowCountSortReducer.class);
+
+      // 4 指定mapper输出数据的kv类型
+      job.setMapOutputKeyClass(FlowBean.class);
+      job.setMapOutputValueClass(Text.class);
+      // 设置分区
+      job.setPartitionerClass(ProvincePartitioner.class);
+      job.setNumReduceTasks(5);
+      // 5 指定最终输出的数据的kv类型
+      job.setOutputKeyClass(Text.class);
+      job.setOutputValueClass(FlowBean.class);
+
+      // 6 指定job的输入原始文件所在目录
+      FileInputFormat.setInputPaths(job, new Path(args[0]));
+      FileOutputFormat.setOutputPath(job, new Path(args[1]));
+
+      // 7 将job中配置的相关参数，以及job所用的java类所在的jar包， 提交给yarn去运行
+      boolean result = job.waitForCompletion(true);
+      System.exit(result ? 0 : 1);
+  }
+
+}
+
+
+```
+
+#### Combiner 合并
+
+1. Combiner 是MR程序中Mapper和Reducer之外的一种组件
+
+2. Combiner 组件的父类就是Reducer
+
+3. Combiner 和Reducer 的区别在于运行的位置
+
+   Combiner 是在每一个MapTask 所在的节点运行
+
+   Reducer 是接收全局所有mapper 的输出结果
+
+4. Combiner 的意义就是对每一个mapTask 的输出进行局部汇总，以减小网络传输量。
+
+5. Combiner 能够引用的前提是不能影响最终的业务逻辑，而且，Cominer的输出kv应该跟Reducer 的输入kv类型要对应起来。
+
+   ```text
+   Mapper                            reducer
+   3 5 7 -> (3+5+7)/3=5		(3+5+7+2+6)/5 = 25/3 不等于(5+4)/2=9/2    
+   2 6 -> (2+6)/2 =4
+   ```
+
+6. 自定义Combiner 实现步骤
+
+   - 自定义Combiner类继承Reducer，重写方法
+
+     ```java
+     public class WordcountCombiner extends Reducer<Text, IntWritable, Text,IntWritable>{
+     
+     	@Override
+     	protected void reduce(Text key, Iterable<IntWritable> values,Context context) throws IOException, InterruptedException {
+     
+             // 1 汇总操作
+     		int count = 0;
+     		for(IntWritable v :values){
+     			count += v.get();
+     		}
+     
+             // 2 写出
+     		context.write(key, new IntWritable(count));
+     	}
+     }
+     
+     ```
+
+   - job驱动类中设置
+
+     ```java
+     job.setCombinerClass(WordcountCombiner.class);
+     ```
+
+##### Combiner 合并案例实操 
+
+![image-20201109230703268](img/image-20201109230703268.png)
+
+reducer 方案一
+
+```java
+package com.example.mr.wordcount;
+
+import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.Text;
+import org.apache.hadoop.mapreduce.Reducer;
+
+import java.io.IOException;
+
+/**
+ * Created by IntelliJ IDEA.
+ *
+ * @author Firewine
+ * @version 1.0
+ * @ProgramName: WordCountReducer
+ * @Create 2020/11/1
+ * @Description:
+ *
+ * keyin ,valueIn map阶段输出的key和value
+ */
+public class WordCountReducer extends Reducer<Text, IntWritable,Text,IntWritable> {
+    IntWritable v = new IntWritable();
+    @Override
+    protected void reduce(Text key, Iterable<IntWritable> values, Context context) throws IOException, InterruptedException {
+    //    ss 1
+    //    ss 1
+    //    1. 累加求和
+        int sum= 0 ;
+        for(IntWritable value:values){
+            sum += value.get();
+        }
+        v.set(sum);
+        //    2. 写出ss 2
+        context.write(key,v);
+    }
+}
+
+
+```
+
+driver 方案二
+
+```java
+// 指定需要使用Combiner，以及用哪个类作为Combiner的逻辑
+job.setCombinerClass(WordcountReducer.class);
+
+```
+
+####  GroupingComparator分组（辅助排序）
+
+案例： 
+
+> 每个订单有多个商品，将 订单号 按照升序排列，商品金额按照降序排列，找到每个订单中，商品金额较大的金额
