@@ -2015,3 +2015,36 @@ job.setCombinerClass(WordcountReducer.class);
 案例： 
 
 > 每个订单有多个商品，将 订单号 按照升序排列，商品金额按照降序排列，找到每个订单中，商品金额较大的金额
+
+
+
+orderBean
+
+```java
+
+```
+
+orderSortMapper
+
+```java
+
+```
+
+orderSortGroupingComparator
+
+```java
+
+```
+
+orderSortReducer
+
+```java
+
+```
+
+ordersortDriver
+
+```java
+
+```
+
