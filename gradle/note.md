@@ -115,7 +115,11 @@ list.findALL(it % 2 != 0 )
 
 #### Project
 
+> 项目： 每一个构建都是由一个或多个projects 构成的，一个project 代表一个jar或者一个网页应该，是代表一件要做的事情
+
 #### Task
+
+> 每一个project 是由一个或多个tasks构成的，一个task 代表一些更加细化的构建。可能是编译一些classes，创建一个jar，生成javadoc
 
 #### Lifecycle 与 Hook
 
@@ -125,31 +129,83 @@ list.findALL(it % 2 != 0 )
 
 ## 插件编写（就是逻辑的打包）
 
-### 构建逻辑的复用
+### 一个基础的java项目
 
-### 简单插件
+```gradle
+apply plugin: 'java'
+```
 
-```java
-class MyAwesomePlugin implements Plugin<Project>{
-	void apply (Project project){
-    	//重复逻辑 
-    }
+它将会把 Java 插件加入到你的项目中,  这意味着许多预定制的任务会被自动加入到你的项目里
+
+> Gradle 默认在 **src/main/java** 目录下寻找到你的正式（生产）源码, 在 **src/test/java** 目录下寻找到你的测试源码, 并在**src/main/resources**目录下寻找到你准备打包进jar的资源文件。测试代码会被加入到环境变量中设置的目录里运行。所有的输出文件都会被创建在构建目录里, 生成的JAR文件会被存放在 **build/libs** 目录下
+
+### 外部的依赖
+
+```gradle
+// 加入maven仓库
+repositories{
+	mavenCentral()  // maven 的中央仓库
 }
-
-// 使用插件
-apply([plugin:MyAwesomePlugin])
+// 加入依赖
+dependencies {
+	testCompile group: 'junit', name: 'junit', version: '4.+'
+}
 ```
 
 
 
-### script 插件 
+### 定制项目
 
-### buildSrc 插件
+#### 定制MANIFEST.MF 文件
 
-### 发布的插件
+```gradle
+sourceCompatibility = 1.5
+version = '1.0'
+jar {
+    manifest {
+        attributes 'Implementation-Title': 'Gradle Quickstart', 'Implementation-Version': version
+    }
+}
+```
 
-## 实际插件分析
+#### 发布jar 文件
 
-### AGP
+```gradle
+uploadArchives {
+    repositories {
+       flatDir {
+           dirs 'repos'
+       }
+    }
+}
+```
 
-### 
+### 多项目的java构建
+
+
+
+#### 构建布局
+
+```txt
+multiproject/
+	api/
+	service/webservice/
+	shard/
+```
+
+
+
+#### 设置setting.gradle
+
+```gradle
+include "shared" ,"api","services:webservice","services:shared"
+```
+
+#### 项目之间的依赖
+
+```gradle
+dependencies {
+    compile project(':shared')
+}
+```
+
