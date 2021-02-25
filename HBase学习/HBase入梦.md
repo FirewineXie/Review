@@ -33,7 +33,7 @@ HBase的目标是存储并处理大型的数据，更具体来说是仅需使用
 
 ### Hbase 架构
 
-![image-20200214110149424](img/image-20200214110149424.png)
+![image-20200214110149424](/static/picture/hbase/image-20200214110149424.png)
 
 1. Client
    Client包含了访问Hbase的接口，另外Client还维护了对应的cache来加速Hbase的访问，比如cache的.META.元数据的信息。
@@ -405,7 +405,7 @@ HBASE 中通过rowkey和columns确定的为一个存贮单元称为cell。每个
 
 #### 命名空间
 
-![image-20200214183341916](img/image-20200214183341916.png)
+![image-20200214183341916](/static/picture/hbase/image-20200214183341916.png)
 
 **1) Table**：表，所有的表都是命名空间的成员，即表必属于某个命名空间，如果没有指定，则在default默认的命名空间中。
 
@@ -421,7 +421,7 @@ HBASE 中通过rowkey和columns确定的为一个存贮单元称为cell。每个
 
 ### 读流程
 
-![image-20200214183515782](img/image-20200214183515782.png)
+![image-20200214183515782](/static/picture/hbase/image-20200214183515782.png)
 
 1）Client先访问zookeeper，从meta表读取region的位置，然后读取meta表中的数据。meta中又存储了用户表的region信息；
 
@@ -441,7 +441,7 @@ HBASE 中通过rowkey和columns确定的为一个存贮单元称为cell。每个
 
 ### 写流程
 
-![image-20200214183542047](img/image-20200214183542047.png)
+![image-20200214183542047](/static/picture/hbase/image-20200214183542047.png)
 
 1）Client向HregionServer发送写请求；
 
