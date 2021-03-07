@@ -567,3 +567,114 @@ product
 
 CartAPi
 
+
+
+## 微服务性能监控系统
+
+
+
+### 监控系统介绍 promethues
+
+- 是一套开源的监控&报警&时间序列数据库的组合
+- 基本原理是通过HTTP协议周期性抓取被监控组件的状态
+- 适合Docke、Kubernetes 环境的监控系统
+
+
+
+##### promethues 架构
+
+##### promethues 重要组件
+
+1. Promethues Server ： 用于收集和存储时间序列数据
+2. Client Library ： 客户端库组成相应的metrics 并暴露给Promethues server
+3. Push Gateway ： 主要用于短期的jobs
+4. Exporters ： 用于暴露已有的第三方服务的metrics 给Prometheus
+5. Alertmanager ： 从Prometheus server 端收到alert 后，会进行去除重复，分组，并路由到对收的接受方式，发出报警
+
+##### 工作流程
+
+1. Promethues server 定期从配置好的jobs /exporters/Pushgateway 中拉取数据
+2. server 记录数据并且根据报警规则推送alert数据
+3. alertmanager 根据配置文件，对接收到的警报进行处理，发出告警
+4. 在图形界面中，可视化采集数据
+
+##### 相关概念-数据模型
+
+1. promethues 中存储的数据为时间序列
+2. 格式上由metric 的名字和一些列的标签（键值对）唯一标识组成
+3. 不同的标签则代表不同的时间序列
+
+##### 相关概念-metric （指标）类型
+
+1. Counter 类型： 一种累加的指标 ， 如 ： 请求的个数，出现的错误数等
+2. Gauge 类型： 可以任意加减，如  ： 温度，运行的goroutines 的个数
+3. Histogram 类型： 可以对观察结果采用，分组及统计，如柱状图
+4. Summary 类型： 提供观测值的count 和sum 功能， 如请求持续时间
+
+##### 相关概念- instance 和 jobs
+
+1. instance ： 一个单独监控的目标，一般对应于一个进程
+2. jobs ： 一组同种类型的instances （ 主要用于保证可扩展性和可靠性）
+
+##### grafana 看板
+
+1. 拥有丰富dashboard 和图标编辑的指标分析平台
+2. 拥有自己的权限管理和用户管理系统
+3. 更适合用于数据可视化展示
+
+
+
+##### 安装
+
+docker 安装
+
+
+
+### Docker-Compose 使用
+
+
+
+#### 介绍
+
+> 1. 是用于定义和运行多容器Docker应用程序的工具
+> 2. 使用YML 文件来配置应用程序需要的所有服务
+> 3. 使用一个命令，就可以创建并启动所有服务
+
+
+
+#### 使用步骤
+
+1. 定义Dockerfile 定义应用程序的环境
+2. 使用docker-compose.yml  定义构成应用程序服务
+3. 执行`docker-compose up` 来启动整个应用程序
+
+
+
+
+
+## 微服务 日志系统
+
+
+
+### 日志系统ELK 介绍
+
+
+
+#### 为什么需要日志系统
+
+1. 业务发展越来越庞大，服务器越来越多
+2. 各种访问日志，应用日志，错误日志量越来越多，无法管理
+3. 开发人员排查问题
+
+#### ELK + 其他 Beats  LogStash and so on
+
+
+
+##### Beats 的六种主要工具
+
+1. Packetbeat ： 网络数据（收集网络流量数据）
+2. Metricbeat ： 指标（收集系统、进程和文件系统级别数据）
+3. Filebeat ： 日志文件（收集日志数据）
+4. Winlogbeat ： windows （收集windows 事件日志数据）`还有linux日志收集`
+5. Auditbeat ： 审计数据（收集审计日志）
+6. HearBeat ： 运行时间监控（收集系统运行时数据）
