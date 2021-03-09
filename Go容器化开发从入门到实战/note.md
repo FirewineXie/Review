@@ -678,3 +678,66 @@ docker 安装
 4. Winlogbeat ： windows （收集windows 事件日志数据）`还有linux日志收集`
 5. Auditbeat ： 审计数据（收集审计日志）
 6. HearBeat ： 运行时间监控（收集系统运行时数据）
+
+
+
+##### FileBeat 基本组成
+
+1. Prospector （勘测者）： 负责管理Harvester 并找到所有读取源
+2. Harvester （收割者） ： 负责读取单个文件内容，每个文件启动一个
+
+##### FileBeat 如何记录文件状态
+
+1. 文件状态记录在文件两种（默认在/var/lib/filebeat/ergistry)
+2. Filebeat 会记录发送前的最后一行，并再可以连接的时候继续发送
+3. 每个Prospector 会为每个找到的文件记录一个状态
+4. Filebeat 存储唯一标识符以检测文件是否先前被收集
+
+## k8s 部署微服务 
+
+
+
+###  k8s 基本介绍
+
+...
+
+- 最小的单位是————容器集
+
+
+
+### 核心组件
+
+#### 集群管理入口： kube-apiserver
+
+#### 管理控制中心： kube-controller-manager
+
+- 副本控制器： Replication  Controller
+  - 确保当前集群中有且仅有N个Pod实例，N是在RC中定义的Pod副本数量
+  - 通过调整RC的spec.replicas 属性 值来实现系统扩容或者缩容
+  - 通过改变RC中的Pod模板（主要是镜像版本） 来实现系统的滚动升级
+- 节点控制器： Node Controller
+- 资源控制器 ： ResourceQuota  Controller
+  - 容器级别： 对CPU 和Memory 限制
+  - Pod级别 ： 对一个Pod 内所有容器的可用资源进行限制
+  - Namespace 级别： 为 Namespace （多租户）级别的资源限制，包括POD、RC，Service、ResourceQuota ，Secret，PV数量
+- 命名空间控制器：Namespace Controller
+- Endpoints 控制器 ： Endpoints Controller
+- 服务控制器 ： Service  Controller
+  - 监听service变化
+  - 如果是一个LoadBalancer 类型，则维护一个表
+
+#### 调度器 ： kube-sceduler
+
+#### 配置中心： etcd
+
+#### 集群管理工具 ： kubectl
+
+#### 结点POD管家 ： kubelet
+
+#### 服务外部代理： kube-proxy
+
+
+
+### 服务器安装
+
+> 详细内容，查看源代码
