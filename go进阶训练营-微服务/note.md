@@ -218,3 +218,51 @@
 
 ![image-20210418225519795](img/image-20210418225519795.png)
 
+![image-20210419214531574](img/image-20210419214531574.png)
+
+
+
+
+
+## GO 语言实践
+
+### Error Vs  Exception
+
+> Error  就是一个普通的接口，
+>
+> 经常使用errors.New()  创建一个错误error对象
+
+![image-20210502215354141](img/image-20210502215354141.png)
+
+这里使用结构体指针，不然会造成多个string 的text 相同，但是判断不相等
+
+Go的异常处理逻辑是不引入Exception ，支持多参数返回，可以在函数签名中带上实现了error interface 的对象，
+
+Go 中有panic 的机制，但是不与其他语言的Exception 一样，当我们抛出异常的时候，相当于把Exception 扔给了调用者去处理
+
+**Go  panic 意味着fatal error ，不能假设调用者来解决panic，意味着代码不能继续运行**
+
+1. 对于真正以外的情况，那些表示不可恢复的程序错误，例如索引越界、不可恢复的环境问题，栈溢出，我们才使用panic。对于其他错误，都是用error 来进行判定。
+
+
+
+
+
+### Error Type
+
+### Handing Error
+#### Wrap errors
+
+1. 在应用代码中，使用erros.New 或者 errors.Errorf 返回错误
+2. 如果调用其他包内的函数，通常简单的直接返回
+3. 如果和==其他库进行协作==，考虑使用erros.Wrap 或者erros.Wrapf 保存堆栈信息，同样使用于标准库协作的时候。
+4. 直接返回错误，而不是每个错误产生的地方到处打日志
+5. 在程序的顶部或者是工作的goroutine 顶部（请求入口），使用 %+v 把堆栈详情记录
+
+> 1. 选择wrap error 是只有applicaitons 可以选择应用的策略，具有最高可重用性的包只能返回根错误值。
+
+### Go  1.13 errors
+
+### Go 2 Error Inspection
+
+### Reference
