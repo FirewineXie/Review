@@ -212,11 +212,483 @@ import "google/protobuf/wrappers.protp";
 
 
 
-### 2.2 实现
+### 2.2 实现(github 代码存储)
 
-#### 2.2.1 开发服务
+
+
+1. go语言
 
 目录架构（不是生产架构）
 
 ![image-20210724170935905](gRPC与云原生应用开发/image-20210724170935905.png)
+
+
+
+
+
+protobuf  文件
+
+```protobuf
+syntax = "proto3";
+
+package ecommerce.v1;
+option go_package = ".;ecommerce_v1";
+
+service ProductInfo {
+  rpc AddProduct(Product)returns (ProductID);
+  rpc GetProduct(ProductID) returns (Product);
+}
+
+message Product {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+}
+
+message ProductID {
+  string value = 1;
+}
+
+
+
+//protoc -I ecommerce --go_out=plugins=grpc:ecommerce  ecommerce\product_info.proto
+```
+
+2. java 语言
+
+gradle 配置
+
+```groovy
+apply plugin: 'java'
+apply plugin: 'com.google.protobuf'
+
+repositories {
+    mavenCentral()
+}
+
+def grpcVersion = '1.39.0'
+
+dependencies {
+    compile "io.grpc:grpc-netty:${grpcVersion}"
+    compile "io.grpc:grpc-protobuf:${grpcVersion}"
+    compile "io.grpc:grpc-stub:${grpcVersion}"
+    compile 'com.google.protobuf:protobuf-java:3.17.2'
+    compile 'javax.annotation:javax.annotation-api:1.3.2'
+}
+
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.google.protobuf:protobuf-gradle-plugin:0.8.17'
+    }
+}
+
+protobuf {
+    protoc {
+        artifact = 'com.google.protobuf:protoc:3.17.2'
+    }
+    plugins {
+        grpc {
+            artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}"
+        }
+    }
+    generateProtoTasks {
+        all()*.plugins {
+            grpc {}
+        }
+    }
+}
+
+
+sourceSets {
+    main {
+        java {
+            srcDirs 'build/generated/source/proto/main/grpc'
+            srcDirs 'build/generated/source/proto/main/java'
+        }
+    }
+}
+
+jar {
+    manifest {
+        attributes "Main-Class": "ecommerce.ProductInfoServer"
+    }
+    from {
+        configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+}
+
+// Generate IntelliJ IDEA's .idea & .iml project files
+apply plugin: 'idea'
+
+// Provide convenience executables for trying out the examples.
+apply plugin: 'application'
+
+startScripts.enabled = false
+```
+
+
+
+
+
+## 三、 gRPC 的通信模式
+
+> gRPC 的 4 种 基础通信模式： 一元RPC 、 服务器端流RPC ， 客户端流RPC 、 双向流RPC
+
+
+
+### 3.1 一元RPC模式[^3]
+
+> 模式 可以简称为 请求-响应模式。 
+>
+> 当客户端调用服务器端的远程方法时，客户端发送请求至服务器端并获得一个响应，与响应一起发送的还有状态细节以及trailer 元数据。
+
+![image-20210727093432971](gRPC与云原生应用开发/image-20210727093432971.png)
+
+[^3]: 大部分RPC 模式都是采用的一元RPC 模式
+
+### 3.2 服务器端流RPC 模式
+
+> 服务器端在接收到客户端的请求消息后，会发回一个响应的序列。这种多个响应所组成的序列也被称流。
+>
+> 服务器端会以 trailer 元数据的形式将其状态发送给客户端，从而标记流的结束。
+>
+> 
+
+![image-20210727093644035](gRPC与云原生应用开发/image-20210727093644035.png)
+
+```go
+func （s * server）SearchOrder(searchQuery *wrappers.StringValue,Stream pb.orderManagement_SearchOrdersServer)error {
+
+    for key,order := rnage orderMap {
+        log.print(key,order)
+        for _,itemStr := range order.items {
+            log.Print(itemStr)
+            if strings.Contains(
+            	itemStr.searchQuery.Value
+            ){
+            	//在流中 发送匹配的订单
+                err := stream.Send(&order)
+                if err != nil {
+                    return fmt.Errorf("error sending message to stream : %v",err)
+                }
+                break;
+            }
+        }
+    }
+}
+```
+
+```go
+// 建立到服务器端的链接
+c := pb.NewOrderManagementClient(conn)
+
+searchStream , _ := c.SearchOrder(ctx,&wrapper.StringValue{Value:"Test"})
+for {
+    searchOrder ,err := searchStream.Recv()
+    if err == io.EOF{
+    	break
+    }
+    // 处理可能出现的错误
+    log.print(err)
+}
+```
+
+
+
+### 3.3 客户端流RPC模式
+
+> 在客户单流RPC 中，客户单会发送多个请求给服务器端，而不再是单个请求。
+>
+> `服务器端不一定要等到从客户端接收到所有消息后才发送响应`
+
+![image-20210727094820332](gRPC与云原生应用开发/image-20210727094820332.png)
+
+```go
+// 服务器端
+func (s *server) UpdateOrders(stream pb.OrderManagement_UpdateOrdersServer)error {
+    ordersStr := "Updated Order IDS : "
+    for {
+        order ,err := stream.Recv()
+        if err === io.EOF {
+            return stream.SendAndClose(&wrapper.StringValue{Value: "Orders processed" + ordersStr})
+        }
+        //更新订单
+        orderMap[order.Id] = *order
+        log.Printf("....")
+        ordersStr += order.Id + ","
+    }
+}
+```
+
+```go
+// 客户端
+c := pb.NewOrderManageMentClient(conn)
+
+
+updateStream ,err := client.UpdateOrders(ctx)
+if err != nil {
+    log.FatalF()
+}
+// 更新订单1
+if err := updateStream.Send(&updOrder1);err != nil {
+    log.fatalf()
+}
+// 更新订单2 
+....
+
+// 停止发送，接收响应
+udpatesRes ,err := updatesStream.CloseAndRecv()
+if err != nil{}
+log.print("success")
+```
+
+
+
+###  3.4  双向流RPC 模式
+
+> 类似于 TCP 的全双工模式。。客户端以消息流的形式发送请求到服务器端，服务器端也以消息流的形式进行响应。
+
+![image-20210727134836240](gRPC与云原生应用开发/image-20210727134836240.png)
+
+> 如图： ，例如订单和发货的之间的关系。存在多个订单有着相同的发货地址。服务器将接收到的订单，，划分成多个集合进行传送
+
+> 这个业务用例的核心理念就是一旦调用RPC 方法，那么无论是客户端还是服务器端，都可以在任意时间发送消息。也包括来自任意一端的流结束标记。
+
+
+
+```go
+// 服务器端
+func (s *server) ProcessOrders(stream pb.OrderManagement_ProcessOrdersServer)error {
+    for {
+        orderId,err := stream.Recv()
+        if err == io.EOF{
+        	...
+            break
+        }
+        for _,comb := range comblinedShipmentMap{
+            stream.Send(&comb)
+        }
+        return nil
+    }
+    if err != nil {
+    	return err
+    }
+    // 基于目的地位置
+    // 将订单组合到发货组合中的逻辑
+    if batchmarker == orderBatchSize {
+    	//将组合后的订单以流的形式分批发送至客户端
+        for _, comb := rnage combineShipmentMap {
+            stream.Send(&comb)
+        }
+        batchMarker = 0
+        combinedShipmentMap = make (map[string]pb.CombineShipment)
+    }else {
+    	batchMarker++
+    }
+}
+```
+
+```go
+// 客户端
+// 处理订单
+streamProcOrder ,_ := c.ProcessOrders(ctx)
+if err := streamProcOrder.Send(&wrapper.stringValue{Value:"102"});err != nil {
+    log.Fatalf()
+}
+if err := streamProcOrder.Send(&wrapper.stringValue{Value:"112"});err != nil {
+    log.Fatalf()
+}
+if err := streamProcOrder.Send(&wrapper.stringValue{Value:"122"});err != nil {
+    log.Fatalf()
+}
+if err := streamProcOrder.Send(&wrapper.stringValue{Value:"132"});err != nil {
+    log.Fatalf()
+}
+
+channel := make(chan struct{})
+go asncClientBidirectionalRPC(streamProcOrder,channel)
+time.Sleep(time.Millisecond *1000)
+
+if err != streamProcOrder.Send(&wrapper.StringValue{Value:"101"});err != nil {
+    log.Fatalf()
+}
+
+if err := streamProcOrder.CloseSend();err != nil {
+    log.Fatal(err)
+}
+<- channel
+
+func asncClientBidirectionalRPC{
+    streamProcOrder pb.OrderManagement_processOrdersClient,c chan struct{}){
+        for {
+            combinedShipment,errProcOrder := streamProcOrder.Recv()
+            if errProcOrder == io.EOF {
+            	break
+            }
+            log.Printf("Combined shipment:",...)
+        }
+    }
+    <-c 
+}
+```
+
+
+
+### 3.5 使用gRPC 实现微服务通信
+
+![IMG_20210727_164143(1)](gRPC与云原生应用开发/image-1.jpg)
+
+
+
+
+
+
+
+## 四、 gRPC 的底层原理
+
+> gRPC 使用protocol-buffers 作为编码技术，将HTTP/2 作为通信协议。
+
+
+
+### 4.1 RPC流
+
+
+
+1. 客户端调用流程
+
+   - 调用getProduct() 方法
+   - gRPC 所生成的存根，进行消息编码，编码完成后，进行消息构建
+   - 通过网络发送请求到服务器端
+
+2. 服务器接收消息
+
+   - 服务器接收到消息，并将消息传输给骨架
+
+   - 通过gRPC 所生成的骨架，进行消息解码，得到需要调用的方法，骨架对getProduct 方法进行本地调用
+
+
+
+### 4.2 使用protocol buffers 编码消息
+
+> 正确定义消息是非常重要的，这决定消息改如何编码，消息的大小。
+
+```protobuf
+message ProductID {
+	string value = 1;
+}
+```
+
+在上述的消息结构体中，value 的字段，字段索引为1 。
+
+当创建value 的值为 15 的消息实例时，对应的字节码内容会包含一个用于value 的字段的标识符，随后进行编码。
+
+`字段的标识符也被称为标签tag`
+
+protobcol buffers 编码后的字节流图示：
+
+![image-20210728144825074](gRPC与云原生应用开发/image-20210728144825074.png)
+
+标签有两个值构成： 字段索引和线路类型（wire type) 。
+
+字段类型就是为字段设置的唯一数字
+
+线路类型就是基于字段类型的，能够为字段输入值的数据类型。
+
+可用的线路类型及其对应的字段类型：
+
+| 线路类型 | 分类         | 字段类型                                                 |
+| -------- | ------------ | -------------------------------------------------------- |
+| 0        | Varint       | int32、int64、uint32、uint64、sint32、sint64、bool、enum |
+| 1        | 64位         | flexd64、sfixed64、double                                |
+| 2        | 基于长度分隔 | string 、 bytes、嵌入式消息、打包的repeated 字段         |
+| 3        | 起始组       | groups （已废弃）                                        |
+| 4        | 结束组       | groups（已废弃）                                         |
+| 5        | 32位         | fixed32、sfixed32、float                                 |
+
+通过上面的表格，就可以将表示字段索引的二进制左移3位并与表示线路类型的值进行按位或操作
+
+```txt
+Tag value  = (field_index << 3 ) | wrie_type
+```
+
+
+
+标签值的结构：
+
+![image-20210728145845600](gRPC与云原生应用开发/image-20210728145845600.png)
+
+通过上面的公式，可以计算出，productID  的value  值 为 10 的标签 值 ，，
+
+字段索引为1 ，字符串的线路类型为2 ，
+
+Tag  value   = （00000001 << 3 ) |  00000010 = 000 1010
+
+
+
+1. protocol-buffers 会使用UTF-8 [^4]来进行 对 字符串值编码
+2. 对于 int32 的整数，会使用Varint 进行编码
+
+
+
+[:^4]: UTF-8编码，会根据字段值变化而变化
+
+
+
+####  编码技术
+
+
+
+##### 1. Varint类型
+
+> Varint(可变长度整数) 是使用单字节或多字节来序列化整数的方法
+>
+> 在Varint 中，除了最后的字节，其他所有字节都会设置最高有效位（MSB），表明后面还有字节。
+>
+> 在分配字节中，每个值都是根据具体的值来分配字节的。
+
+##### 2. 有符合整数类型
+
+> 有符号整数类型是能够表示正整数和负整数值的类型。
+>
+> 1. 有符号的类型，会使用`zigzag`编码进行将有符号变成无符号整数。
+> 2. 无符号整数，会使用Varint 进行编码
+
+针对有符号整数使用zigzag 编码
+
+| 原始值 | 映射值 |
+| ------ | ------ |
+| 0      | 0      |
+| -1     | 1      |
+| 1      | 2      |
+| -2     | 3      |
+| 2      | 4      |
+
+##### 3. 非Varint 类型
+
+> 会分配固定的字节。例如 fixed64、 fixed32  用来表示 64/32位 的线路类型。
+
+##### 4. 字符串类型
+
+> 字符串类型属于`基于长度分隔`的线路类型。
+>
+> 首先会有一个经过Varint 编码的长度值，随后才是指定数量的字节数据，值会采用UTF-8编码
+
+
+
+### 4.3 基于长度前缀的消息分帧
+
+> 消息分帧 ： 构建消息和通信 ，以便于目标受众很容易地提取信息
+>
+> 而gRPC使用了`长度前缀分帧`的消息分帧技术
+
+> 长度前缀分帧是指在写入消息本身之前，写入长度消息，来表明每条消息的大小。
+
+
+
+**在gRPC 通信中，每条消息都有额外的4字节用来设置其大小。所以不可以超高4GB 的所有消息**
+
+当编译成二进制格式的消息后，然后计算二进制内容的大小，并以 `大端`格式将其添加到二进制内容的前面。
 
