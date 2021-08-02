@@ -1,32 +1,3 @@
----
-title: "Springcloud"
-subtitle: ""
-date: 2020-12-24T20:23:05+08:00
-lastmod: 2020-12-24T20:23:05+08:00
-draft: true
-author: "Firewine"
-authorLink: ""
-description: "never forget study"
-
-tags: ["spring"]
-categories: ["spring","分布式"]
-
-hiddenFromHomePage: false
-hiddenFromSearch: false
-
-featuredImage: ""
-featuredImagePreview: ""
-
-toc:
-  enable: true
-math:
-  enable: false
-lightgallery: false
-license: ""
----
-
-
-
 # java 分布式
 
 
