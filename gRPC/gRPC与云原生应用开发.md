@@ -690,5 +690,481 @@ Tag  value   = （00000001 << 3 ) |  00000010 = 000 1010
 
 **在gRPC 通信中，每条消息都有额外的4字节用来设置其大小。所以不可以超高4GB 的所有消息**
 
-当编译成二进制格式的消息后，然后计算二进制内容的大小，并以 `大端`格式将其添加到二进制内容的前面。
+当编译成二进制格式的消息后，然后计算二进制内容的大小，并以 `大端`[^5]格式将其添加到二进制内容的前面。
+
+除了消息大小，帧中还有单字节的无符号整数。用来表名数据是否进行了压缩。
+
+
+
+
+
+### 4.4 基于HTTP/2 的gRPC
+
+> 在http/2 中，客户端和服务器的所有通信都是通过一个TCP连接完成的，这个连接可以传送任意数量的双向字节流。
+>
+> 专业术语：
+>
+> - 流 ： 在一个已建立的连接上的双向字节流。一个流可以携带一条或多条信息。
+> - 帧： HTTP/2 中最小的通信单元。每一帧都包含一个帧头，它至少要标记该帧所属的流
+> - 消息： 完整的帧序列，映射为一条逻辑上的HTTP消息，由一帧或多帧组成。这么样，消息就可以多路复用
+
+
+
+#### 4.4.1 请求信息
+
+请求信息包含3 部分：
+
+- 请求头信息
+- 以长度作为前缀的消息
+- 流结束标记（简称EOS标记）
+
+对于gRPC 来说，请求信息
+
+- 始终是POST请求
+- 端点路径： 构造为 服务名/方法名
+- te  =  trailers  定义对不兼容代理的检测。在gRPC 中，这个值必须是 trailers
+- content-type  应该都是以application/grpc开头，，不然会报415 响应
+- 定义消息的压缩类型。可选的值是identity、gzip、deflate、snappy和{custom}
+
+
+
+#### 4.4.2 响应信息
+
+
+
+响应信息包含3 部分：
+
+- 响应头信息
+- 以长度为前缀的消息
+- trailer
+
+对于gRPC 来说，请求信息
+
+- 压缩类型与请求信息压缩类型一样
+- Content-Type 与请求信息一样
+- 注意：trailer
+  - 还包含gRPC 自己定义的状态码。[状态码连接](https://grpc.io/docs/guides/error/)
+
+
+
+
+
+
+
+#### 理解gRPC通信模式中的消息流
+
+
+
+##### 1. 一元RPC 模式
+
+请求消息结束后，会跟随一个EOS 标记，方便客户端`半关`连接，处于只能接受，不能发送的状态。
+
+响应消息结束后，会跟随一个trailer 头信息，通信就会完整关闭，表示整一个响应请求结束。
+
+
+
+##### 2. 服务器端流RPC模式
+
+前后都跟一元RPC模式，
+
+服务器端不同的是，在trailer 前面，可以有多个响应
+
+##### 3. 客户端流RPC模式
+
+与服务端流RPC 模式其他的相同的情况下，相反的是，客户端可以在EOS 标记前发送多个请求
+
+##### 4. 双向流RPC 模式
+
+与前面不同的是，两者都会互发，无须等待对方结束。 客户端和服务器端会同时发送消息。两者都可以在自己一侧关闭连接，这意味他们不能在发送消息了。
+
+
+
+
+
+## 五、gRPC ： 超越基础知识
+
+
+
+### 5.1 拦截器
+
+> 对于一元RPC ，可以使用一元拦截器
+>
+> 对于流RPC，可以使用流拦截器
+
+
+
+#### 5.1.1 服务器端拦截器
+
+
+
+##### 1. 一元拦截器
+
+需要先实现UnaryServerInterceptor 类型的函数，并在gRPC服务器端的时候，注册进来
+
+```go
+func(ctx context.Context, req interface{} ,info *UnaryServerInfo,handler UnaryHandler)(resp interface{},err error)
+```
+
+
+
+demo
+
+```go
+func orderUnaryServerInterceptor(ctx context.Context, req interface{} ,info *UnaryServerInfo,handler UnaryHandler)(resp interface{},err error){
+	// 前置处理逻辑
+    // 通过检查传入的参数,获取关于当前RPC 的信息
+    info.FullMethos
+    // 调用handler 完成一元RPC 的正常执行
+    m,err := handler(ctx,req)
+    
+    //后置处理逻辑
+    return m,err
+}
+
+
+//注册
+func main(){
+    s := grpc.NewServer(grpc.UnaryInterceptor(orderUnaryServerInterceptor))
+}
+```
+
+
+
+##### 2. 流拦截器
+
+需要先实现streamServer.Interceptor 服务器端拦截器类型
+
+```go
+func(srv interface{},ss ServerStream,info *StreamServerInfo,handler StreamHandler)error
+```
+
+
+
+demo
+
+```go
+type wrappedStream struct {
+	grpc.ServerStream
+}
+
+// 处理流RPC 接收到的消息
+func (w *wrappedStream) RecvMsg (m interface{})error {
+    return w.ServerStream.RecvMsg(m)
+}
+// 处理流RPC 发送的消息
+func (w *wrappedStream) SendMsg (m interface{})error {
+    return w.ServerStream.SendMsg(m)
+}
+
+func newWrappedStream(s grpc.ServerStream) grpc.ServerStream {
+    return &wrappedStream{s}
+}
+
+func orderServerStreamInterceptor(src interface{},ss grpc.ServerStream,info *grpc.StreamServerInfo,handler gprc.StreamHandler)error{
+
+    err := handler(srv,newWrappedStream(ss)
+                   return err
+ }
+                   
+                   
+ // 注册
+                   s := grpc.NewServer(grpc.StramInterceptor(orderServerStreamInterceptor))
+```
+
+
+
+
+
+
+
+
+
+####  5.1.2 客户端拦截器
+
+
+
+#####  1. 一元拦截器
+
+实现UnaryClientInterceptor
+
+``` go
+func (ctx context.Context,method string,req,reply interface{},cc *ClientConn,invoker UnaryInvoker,opts ...CallOption)error 
+
+
+```
+
+
+
+
+
+demo
+
+```go
+func orderUnaryClientInterceptor(
+    ctx context.Context,method string ,req,reply interface{}，cc *grpc.ClientConn,invoker grpc.UnaryInvoker, opts ...grpc.CallOption)error {
+
+
+
+    err := invoker (ctx ,method,req,reply,cc,opts)}
+)
+
+grpc.Dial(address,gprc.withInsecure(),grpc.WithUnaryInterceptor(orderUnaryClientInterceptor)
+```
+
+
+
+##### 2. 流拦截器
+
+实现StreamClientInterceptor
+
+```go
+func (ctx context,Context,desc *streamDesc,cc *ClientConn,method string,streamer Streamer,opts ..CallOption) (ClientStream,error)
+```
+
+
+
+demo
+
+
+
+```go
+func clientStreamInterceptor(ctx context.Context,desc *grpc.StreamDesc,cc *grpc.CLientConn,method string , streamer grpc.Streamer,opts ...grpc.CallOption)(grpc.ClientStream,error){
+    s,err := streamer(ctx,desc,cc,method,opts...)
+}
+
+
+type wrappedStream struct {
+	grpc.ClientStream
+}
+
+// 处理流RPC 接收到的消息
+func (w *wrappedStream) RecvMsg (m interface{})error {
+    return w.ClientStream.RecvMsg(m)
+}
+// 处理流RPC 发送的消息
+func (w *wrappedStream) SendMsg (m interface{})error {
+    return w.ClientStream.SendMsg(m)
+}
+
+func newWrappedStream(s grpc.ClientStream) grpc.ServerStream {
+    return &wrappedStream{s}
+}
+
+func orderServerStreamInterceptor(src interface{},ss grpc.ServerStream,info *grpc.StreamServerInfo,handler gprc.StreamHandler)error{
+
+    err := handler(srv,newWrappedStream(ss)
+                   return err
+ }
+                   
+                   
+ // 注册
+ s := grpc.NewServer(grpc.StramInterceptor(clientStreamInterceptor))
+```
+
+
+
+###  5.2 截止时间
+
+> - 截止时间 （微服务一般采用截止时间为最佳实践）
+>   - 是以请求开始的绝对时间来表示（即使API将他们表示为持续时间偏移），并且应用于多个服务调用
+> - 超时时间
+>   - 可以指定客户端应用程序等待RPC 完成的时间（之后一错误结束），通常以持续时长的方式来指定，并且在每个客户端本地进行应用
+
+
+
+demo
+
+
+
+```go
+conn,err := grpc.Dial(address,grpc.withInsecure())
+if err != nil{
+    log.Fatalf()
+}
+defer conn.close()
+
+client := pb.NewOrderManagementCLient(conn)
+
+clientDeadLine := time.Now().add(time.Duration(2 * time.Second))
+
+ctx,cancel := context.WithDeadline(context.Background(),clientDeadline)
+
+defer cancel()
+
+
+// 添加订单
+order1 := pb.Order{Id:"1.1"}
+// 捕获出现的错误
+res,addErr := client.AddOrder(ctx,&Order1)
+
+if addErr != nil{
+    // 使用statu 包确定错误码
+    got := status.Code(AddErr)
+}else {
+    log.Print()
+}
+```
+
+
+
+
+
+### 5.3 取消
+
+在GO语言中，一般都使用Context.Context() 进行上下午传递。其中WtihCancel 是一个内置函数，当调用这个函数，grPC就回创建头信息，表示当前请求截止。
+
+可以通过context.WithTImout 获取cancel 函数。
+
+
+
+### 5.4 错误处理
+
+
+
+GRPC 使用一组 专用的状态码，但是本身自带的状态码类型有限，使用google.rcp包所提供的的更丰富的错误模型，但是只有所支持的语言，才可以使用，例如 c++, GO,java ,Python.
+
+
+
+demo
+
+```go
+if orderReq.Id == "-1"{
+    errorStatus := status.New(codes.InvalidArgument,"custom error")
+    ds,err := errorStatus.WithDetails(&epb.BadRequest_FieldViolation{...})
+    
+    if err != nil{
+        return nil,errorStatus.Err()
+    }
+    return nil,ds.Err()
+}
+
+```
+
+
+
+
+
+### 5.5 多路复用
+
+
+
+> gRPC 还容许在同一个RPC 服务器端上运行多个gRPC 服务，也允许多个客户端存根使用同一个gRPC 端连接，这种功能就叫 多路复用。
+>
+> 一般也不会这样子搞，，但是这个用途强大的地方是，同一个服务器端进程中托管同一个服务的多个主版本。保证API 在发生破坏性变化，依旧还能适应遗留客户端。
+
+
+
+### 5.6 元数据
+
+> 元数据的构造遵循key-value 的形式
+
+
+
+元数据最常见的用途就是： 在gRPC 应用程序之间交换安全头信息。
+
+
+
+
+
+####  5.6.1 创建和检索元数据
+
+```go
+// method_1
+metadata.New(map[string]string{"key1","val1"})
+
+// method_2
+metadata.Pairs(
+"key12","val1",
+"key12","key2")
+```
+
+metadata.Pairs 创建的元数据对，具有相同的键的元数据会被合并为一个列表。
+
+
+
+
+
+在客户端或服务器端读取元数据，可以通过传入的RPC上下午以metata.FromIncomingContext(ctx) 函数来实现，会返回元数据的map
+
+
+
+#### 5.6.2 发送和接收元数据： 客户端
+
+有两种方式来实现这一点：
+
+1. NewOutgoingContext 创建带有新元数据的上下文。 （`会替换上下文中所有已有的元数据`）
+2. 使用AppendToOutgoingContext 将元数据附加到已有的上下文中。
+
+
+
+
+
+```go
+//在gRPC 客户端发送元数据
+me : metadata.Pairs(....)
+
+
+mdCtx := metada.NewOutgoingContext(context.Background(),md)
+
+ctxA := metadata.AppendToOutgoingContext(mdCtx,"k1","k2")
+
+// 发送一元rpc
+client.SomeRPC(ctxA,someRequest)
+
+// 发送流 rpc
+client.SomeStreamingRPC(ctxA)
+
+
+```
+
+
+
+```go
+// 客户端接收元数据
+var header ,trailer metadata.MD
+
+//****** 一元
+client.SomeRPC(ctx,someRequest,grpc.Header(&header),grpc.Trailer(&trailer)),)
+
+
+// ***** 流RPC
+
+stream,err := client.SomeStreamingRPC(ctx)
+
+// 检索头信息
+header ,er := stream.Header()
+// 检索trailer
+trailer := stream.Trailer()
+
+```
+
+
+
+#### 5.6.3 发送和接收元数据：服务器端
+
+```go
+func (s *server)SomeRPC(ctx context.Context，in pb.someRequest)(*pb.someResponse,error){
+    md,ok := metadata.FromIncomingContext(ctx)
+}
+
+func (s *server)SomeRPC(ctx context.Context，in pb.Serveice_SomeStreamingRPCS)(*pb.someResponse,error){
+    md,ok := metadata.FromIncomingContext(ctx)
+}
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+[^5]: 大端是一种在系统或消息中对二进制数据进行排序的方式。在大端格式中序列中的最高有效位（2 的最大乘方）存储在最低存储地址上。
+
+
 
