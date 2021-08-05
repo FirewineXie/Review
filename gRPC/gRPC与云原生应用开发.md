@@ -1147,12 +1147,121 @@ func (s *server)SomeRPC(ctx context.Context，in pb.someRequest)(*pb.someRespons
     md,ok := metadata.FromIncomingContext(ctx)
 }
 
-func (s *server)SomeRPC(ctx context.Context，in pb.Serveice_SomeStreamingRPCS)(*pb.someResponse,error){
+func (s *server)SomeRPC(ctx context.Context，in pb.Serveice_SomeStreamingRPCServer)(*pb.someResponse,error){
     md,ok := metadata.FromIncomingContext(ctx)
 }
 ```
 
 
+
+在一元RPC和流RPC 这两种情景中，都可以通过grpc.SendHeader 来发送元数据。 如果想将元数据作为trailer 的一部分发送，则需要通过grpc.SetTrailer 或对应流的SetTrailer 方法，将元数据设置为上下文trailer的一部分
+
+
+
+
+
+#### 5.6.4 命名解析器（不重要，因为一般采用etcd，或nacos 等替换）
+
+> 命名解析器接收一个服务的名称并返回后端IP 的列表
+
+```go
+type exampleResulverBuilder struct{}
+
+func (*exampleResolverBuilder) Build(target resolver.Target,cc resolver.ClientConn,opts resolver.BuildOption)(resolver.Resolver ,error){
+    r  := &exampleResolver {
+        target: target,
+        cc: cc,
+        addrsStore: map[string][]string{
+            exampleServiceName:addrs,
+        },
+    }
+    r.start()
+    return r,nil
+}
+
+func (*exampleResolverBuilder) Scheme() string {return exampleScheme}
+
+type exampleResolver struct {
+	target resolver.Target
+    cc resolver.ClientConn
+    addrsStore map[string][]string
+}
+
+func (r *exampleResolver) start(){
+    addrStrs := r.addrsStore[r.target.Endpoint]
+    addrs := make([]resolver.Addresss,len(addrStrs))
+    for i,s := range addrStrs {
+        addrs[i] = resolver.Address{Addr:s}
+    }
+    r.cc.UpdateState(resolver.State{Addresses:addrs})
+}
+
+func (r *exampleResolver) ResolveNow(o resolver.ResolveNowOption){}
+func (r *exampleResolver) Close(){}
+func init{
+    resolver.Register(&exampleResolverBuildre{})
+}
+```
+
+
+
+或者使用 k8s 或 服务网格 。而客户端负载负载均衡已经逐渐消失了
+
+
+
+
+
+
+
+### 5.7 负载均衡
+
+> gRPC 通常使用两种主要的负载均衡机制： `负载均衡代理`和`客户端负载均衡`
+
+
+
+#### 5.7.1  负载均衡器代理
+
+> 负载均衡器，类似于 nginx 的代理功能是一样的。 或者可以说，直接就可以使用nginx 作为负载均衡代理
+
+
+
+#### 5.7.2 客户端负载均衡
+
+> 负载均衡逻辑也可以完全作为客户端应用程序的一部分来进行开发，也可以实现为一个专用的服务器端，叫做后备负载均衡器。
+
+```go
+
+pickfirstConn ,err := grpc.Dial(fmt.Sprintf("%s:///%s"),
+                               exampleScheme = "example",
+                                grpc.WithBalancerName("pick_first"),
+                                grpc.WithInsecure(),)
+if err != nil{
+    log.fatal()
+}
+defer pickfirstConn.Close()
+
+makeRPCs(pickfirstConn,10)
+// 使用round_robin 策略生成另一个ClientConn
+roundrobinConn,err := grpc.Dial(
+    fmt.Sprintf("%s:///%s",exampleScheme,exampleServiceName),
+    grpc.WithBalancerName("round_robin"),
+    grpc.WtihInsecrue())
+
+defer roundrobinConn.Close()
+makeRPCs(roundrobinConn,10)
+```
+
+
+
+grpc 有两个默认支持的负载均衡算法 ： pick_first 和  round_robin
+
+
+
+#### 5.7.3 压缩
+
+在go 语言中，可以借助 client.AddOrder(ctx,&order1,grpc.UseCompressor(gzip.Name)) 便可以容易的实现。
+
+在服务器端，已注册的压缩器会自动解码请求消息，
 
 
 
