@@ -2,7 +2,7 @@
 
 
 
-## init
+##  安装
 
 ### install
 
@@ -67,7 +67,14 @@ export VERSION=2.4.3curl -LO  https://github.com/prometheus/prometheus/releases/
 ####  使用容器安装
 
 ```sh
-    docker run -p 9090:9090 -v /etc/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml prom/prometheus
+docker run -d --name=prometheus -p 9090:9090  \
+-v /data/prometheus/conf/prometheus.yml:/etc/prometheus/prometheus.yml \
+-v /data/prometheus/prometheus:/prometheus   prom/prometheus  \
+--config.file=/etc/prometheus/prometheus.yml \
+--storage.tsdb.path=/prometheus \
+--web.console.libraries=/usr/share/prometheus/console_libraries \
+--web.console.templates=/usr/share/prometheus/consoles \
+--web.enable-lifecycle
 ```
 
 
@@ -217,7 +224,7 @@ Exporter将监控数据采集的端点通过HTTP服务的形式暴露给Promethe
 
 
 
-## 探索PromQL
+# 探索PromQL
 
 
 
